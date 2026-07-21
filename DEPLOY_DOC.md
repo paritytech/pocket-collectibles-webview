@@ -5,14 +5,14 @@ published to the **Polkadot Bulletin Chain** (content-addressed, served over
 IPFS gateways) and bound to a human-readable **DotNS `.dot` domain**. The
 native app loads that `.dot` name directly; browsers reach it through a gateway.
 Deployment is automated by a GitHub Actions workflow that calls the shared
-[`paritytech/bulletin-deploy`](https://github.com/paritytech/bulletin-deploy)
+[`paritytech/polkadot-app-deploy`](https://github.com/paritytech/polkadot-app-deploy)
 reusable workflow.
 
 > This repo ships an **example** deploy workflow. The committed
 > [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml) fills in a
 > concrete domain, environment, and gateway purely as an illustration — replace
 > those with your own (see §3e). The valid environment ids, gateways, and RPC
-> endpoints come from `bulletin-deploy` itself (`--list-environments`), not from
+> endpoints come from `polkadot-app-deploy` itself (`--list-environments`), not from
 > this repo.
 
 - **Workflow:** [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)
@@ -24,10 +24,10 @@ reusable workflow.
 
 ```
 push to main ─┐
-PR opened ────┤→  build (npm ci + npm run build → dist/, uploaded as artifact)
-              │        │
-              │        ▼
-              │   bulletin-deploy reusable workflow:
+PR opened ────┤→  typecheck ─┬─ build (npm run build → dist/, uploaded as artifact)
+              │              │
+              │              ▼
+              │   polkadot-app-deploy reusable workflow:
               │     1. download the build artifact
               │     2. merkleize + upload the files to the Bulletin Chain (→ a CID)
               │     3. point a DotNS .dot domain at that CID (signed by DOTNS_MNEMONIC)
@@ -73,9 +73,9 @@ Actions → New repository secret):
    by a different account the deploy fails with *"Domain … is owned by a
    different account"* — see §8.
 2. **It (or its upload pool) is authorized for Bulletin storage.** Uploads go
-   through Bulletin-authorized accounts. By default bulletin-deploy uses a
+   through Bulletin-authorized accounts. By default polkadot-app-deploy uses a
    derived **pool** of uploader accounts that must be authorized once by an
-   operator (`bulletin-bootstrap`). If unauthorized you get *"Account … is not
+   operator (`polkadot-app-bootstrap`). If unauthorized you get *"Account … is not
    authorized for Bulletin storage"* — see §8.
 3. **It is funded** on the target network to pay the DotNS registration storage
    deposit and transaction fees.
@@ -107,14 +107,14 @@ deployer account.
 
 ### c. Authorize Bulletin uploads (operator step)
 
-Bulletin uploads require an authorized uploader. bulletin-deploy uses a
+Bulletin uploads require an authorized uploader. polkadot-app-deploy uses a
 **pool** of derived accounts by default (to spread nonce/authorization load).
 An operator initializes/authorizes that pool **once** per network with the
 companion CLI:
 
 ```bash
-npm install -g bulletin-deploy           # ships bulletin-bootstrap too
-bulletin-bootstrap --pool-size 10        # uses BULLETIN_POOL_MNEMONIC / MNEMONIC
+npm install -g @parity/polkadot-app-deploy        # ships polkadot-app-bootstrap too
+polkadot-app-bootstrap --env <id> --pool-size 10  # uses BULLETIN_POOL_MNEMONIC / MNEMONIC
 ```
 
 This is an admin/setup operation, **not** part of routine deploys. On a managed
@@ -134,17 +134,19 @@ values. Change:
 - the **artifact name** if you like,
 - the **`dotns-domain`** values (the name you publish to + the PR-preview pattern),
 - the **`env` / `gateway`** matrix to the network(s) you target — run
-  `bulletin-deploy --list-environments` for valid ids,
-- `permissions:` — `contents: read` and `pull-requests: write` (the latter so
-  the preview job can post its sticky PR comment),
-- pin **`bulletin-deploy-version`** (minimum supported is `0.7.0`).
+  `polkadot-app-deploy --list-environments` for valid ids,
+- `permissions:` — `contents: read` at the workflow level; the preview job
+  adds `pull-requests: write` so it can post its sticky PR comment,
+- pin **`polkadot-app-deploy-version`** (minimum supported is `0.7.0`) and the
+  reusable-workflow ref (`@v<version>`) to the same release.
 
 ---
 
 ## 4. The reusable-workflow inputs
 
-`deploy.yml` calls `paritytech/bulletin-deploy/.github/workflows/deploy.yml@main`.
-Inputs it accepts (the ones this repo sets are marked ✓):
+`deploy.yml` calls `paritytech/polkadot-app-deploy/.github/workflows/deploy.yml@v0.13.1`
+— the ref is pinned to the same release as `polkadot-app-deploy-version`; bump
+both together. Inputs it accepts (the ones this repo sets are marked ✓):
 
 | Input | Type | Default | Purpose |
 |---|---|---|---|
@@ -155,17 +157,17 @@ Inputs it accepts (the ones this repo sets are marked ✓):
 | `skip-cache` ✓ | boolean | `false` | Force redeploy, ignoring the build-hash cache. **Required `true` here** — see §6. |
 | `comment-on-pr` ✓ | boolean | `false` | Post/replace a sticky PR comment with the deploy link. |
 | `max-retries` ✓ | number | `1` | Retry attempts; retries fire only on flake-class chain errors (nonce-stale, ChainHead disjointed, …). This repo uses `10`. |
-| `bulletin-deploy-version` ✓ | string | `''` (latest stable) | npm version/dist-tag of bulletin-deploy to install. |
+| `polkadot-app-deploy-version` ✓ | string | `''` (latest stable) | npm version/dist-tag of polkadot-app-deploy to install. |
 | `js-merkle` | boolean | `false` | Pure-JS merkleization (skips the IPFS Kubo download). |
 | `direct-signer` | boolean | `false` | Use the mnemonic directly as the signer instead of the derived upload pool. |
 | `derivation-path` | string | `''` | Substrate derivation path on the mnemonic (e.g. `//deploy/3`) — lets parallel direct-signer runs avoid nonce contention. |
 | `pool-size` | number | `10` | Number of derived pool accounts (pool mode). |
 | `rpc` | string | `''` | Override the Bulletin RPC within the chosen env. |
 | `runner` | string | `ubuntu-latest` | Runner label. |
-| `bulletin-deploy-ref` | string | `''` | Build bulletin-deploy from a git ref instead of npm (takes precedence over `-version`). |
+| `polkadot-app-deploy-ref` | string | `''` | Build polkadot-app-deploy from a git ref instead of npm (takes precedence over `-version`). |
 | `gateway-path-style` | boolean | `false` | URL form: `false` → `https://{domain}.{gateway}`; `true` → `https://{gateway}/{domain}.dot`. |
 | `gh-pages-mirror` | boolean | `false` | Also push the CAR to the caller repo's `gh-pages` branch as an HTTP fast-path (needs `contents: write`). |
-| `comment-header` | string | `bulletin-deploy` | Sticky-comment identity (override if multiple deploy workflows comment on the same PR). |
+| `comment-header` | string | `polkadot-app-deploy` | Sticky-comment identity (override if multiple deploy workflows comment on the same PR). |
 | `tag` | string | `''` | Free-form Sentry `deploy.tag` label. |
 
 **Secrets:** `mnemonic` (required) ← `DOTNS_MNEMONIC`; `sentry-dsn` (optional).
@@ -182,14 +184,14 @@ The reusable workflow (per leg):
    cache keyed on it. On a hit it reuses the prior CID and skips the upload
    (unless `skip-cache: true`).
 3. Installs IPFS Kubo (unless `js-merkle`), installs the pinned
-   `bulletin-deploy`, and asserts it's ≥ `0.7.0`.
-4. Runs `bulletin-deploy build <dotns-domain> --env <env> [flags]`, which
+   `polkadot-app-deploy`, and asserts it's ≥ `0.7.0`.
+4. Runs `polkadot-app-deploy build <dotns-domain> --env <env> [flags]`, which
    uploads the content to Bulletin and updates the DotNS record. Retries up to
    `max-retries` on transient chain errors only.
 5. Validates that a CID + domain came back, writes a job summary (domain, CID,
    browser URL) and, on PRs, the sticky comment.
 
-The equivalent local command (see §7) is `bulletin-deploy ./dist <domain>.dot --env <env>`.
+The equivalent local command (see §7) is `polkadot-app-deploy ./dist <domain>.dot --env <env>`.
 
 ---
 
@@ -204,8 +206,7 @@ publishing to that environment.
 
 Forcing `skip-cache: true` makes every leg always deploy. The tradeoff is that
 every push to `main` redeploys every environment even when the build content is
-unchanged; that's intentional, and why the `workflow_dispatch` `skip-cache`
-input no longer affects production. Leave it `true`.
+unchanged; that's intentional. Leave it `true`.
 
 ---
 
@@ -220,13 +221,13 @@ force a redeploy without a new commit.
 
 ```bash
 npm run build                            # → dist/index.html (single file)
-npm install -g bulletin-deploy
+npm install -g @parity/polkadot-app-deploy
 export MNEMONIC="<the deploy mnemonic>"  # same account that owns the domain
-bulletin-deploy ./dist <your-domain>.dot --env <env>
+polkadot-app-deploy ./dist <your-domain>.dot --env <env>
 ```
 
 Use a throwaway domain when experimenting so you don't repoint a real one.
-`bulletin-deploy --list-environments` shows valid `--env` ids; `--help` lists
+`polkadot-app-deploy --list-environments` shows valid `--env` ids; `--help` lists
 all flags.
 
 ### Testing a build on a phone
@@ -243,21 +244,21 @@ LAN, but that won't exercise the DotNS/gateway path.)
 | Symptom | Cause / fix |
 |---|---|
 | `Domain … is owned by a different account` | `DOTNS_MNEMONIC` doesn't own that `.dot` name. Transfer the domain to this account, or deploy under a name it owns. |
-| `Account … is not authorized for Bulletin storage` | The uploader (pool) isn't authorized on that network. Operator runs `bulletin-bootstrap` for that env (§3c). |
+| `Account … is not authorized for Bulletin storage` | The uploader (pool) isn't authorized on that network. Operator runs `polkadot-app-bootstrap` for that env (§3c). |
 | Deploy "succeeds" but step fails on *"produced no CID or domain"* | The deploy process likely OOM'd. The workflow already sets `--max-old-space-size=8192`; re-run, and check for an unusually large `dist/`. |
 | Only one environment got the new build | `skip-cache` was off — the second matrix leg cache-hit and skipped. Keep `skip-cache: true` (§6). |
 | Preview comment didn't post | The calling workflow needs `permissions: pull-requests: write`. |
 | Transient `nonce stale` / `ChainHead disjointed` / connection errors | Flake-class; `max-retries: 10` retries these automatically. A single failure usually self-heals on re-run. |
-| Version error: *"bulletin-deploy vX is below minimum v0.7.0"* | Bump `bulletin-deploy-version` to ≥ `0.7.0`. |
+| Version error: *"polkadot-app-deploy vX is below minimum v0.7.0"* | Bump `polkadot-app-deploy-version` to ≥ `0.7.0`. |
 
 ---
 
 ## 9. Reference
 
-Environment ids, gateways, and RPC endpoints come from bulletin-deploy, not
-this repo — run `bulletin-deploy --list-environments` for the valid `--env` ids
+Environment ids, gateways, and RPC endpoints come from polkadot-app-deploy, not
+this repo — run `polkadot-app-deploy --list-environments` for the valid `--env` ids
 and their gateways. Default URL form is subdomain: `https://<domain>.<gateway>`.
 
 **Related:**
 - Bridge contract / what the webview consumes at runtime: [`NATIVE_SPEC.md`](./NATIVE_SPEC.md)
-- The deploy tool: [`paritytech/bulletin-deploy`](https://github.com/paritytech/bulletin-deploy)
+- The deploy tool: [`paritytech/polkadot-app-deploy`](https://github.com/paritytech/polkadot-app-deploy)
