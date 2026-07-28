@@ -4,6 +4,13 @@ import ParticleCanvas, { type ParticleCanvasApi } from './components/ParticleCan
 import GalleryScreen, { EmptyGallery } from './screens/GalleryScreen'
 import DetailScreen from './screens/DetailScreen'
 import IntroOverlay from './components/IntroOverlay'
+import ChestArrival from './components/ChestArrival'
+import DevPanel from './components/DevPanel'
+import ItemPicker from './components/ItemPicker'
+import MintCeremony, { type CeremonyEntry } from './components/MintCeremony'
+import RecipientPicker from './components/RecipientPicker'
+import SendOverlay from './components/SendOverlay'
+import ThemeSwitcher from './components/ThemeSwitcher'
 import { hasSeenIntro, markIntroSeen } from './firstRun'
 import {
   readInitialCollection,
@@ -13,9 +20,36 @@ import {
   getDroppedCount
 } from './bridge/collection'
 import { sendFlowEvent } from './bridge/send'
-import type { CollectionInput, OwnedNft } from './bridge/types'
+import { newRequestId, sendBridgeRequest } from './bridge/requests'
+import type { CollectionInput, OwnedNft, Ticket } from './bridge/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
-import { DEV_MOCKS } from './devMocks'
+import { buildTicketEntries, type TicketEntry } from './collectibles/tickets'
+import type { CatalogItem } from './collectibles/mintCollections'
+import { loadScenario } from './mock/mockNative'
+import {
+  COLLECTION_SIZES,
+  DEV_MOCKS,
+  TICKET_SETS,
+  composeScenario,
+  type CollectionSizeId,
+  type FlavorId,
+  type TicketSetId
+} from './devMocks'
+
+/** Parse the composed-scenario axis params (?tickets=&collection=&flavors=)
+ *  the dev panel mirrors into the URL. Null when none are present. */
+function readAxisParams(): { tickets: TicketSetId; collection: CollectionSizeId; flavors: FlavorId[] } | null {
+  const q = new URLSearchParams(window.location.search)
+  const t = q.get('tickets')
+  const c = q.get('collection')
+  if (!t && !c) return null
+  const tickets = (t && t in TICKET_SETS ? t : 'none') as TicketSetId
+  const collection = (c && c in COLLECTION_SIZES ? c : 'typical') as CollectionSizeId
+  const flavors = (q.get('flavors') ?? '')
+    .split(',')
+    .filter((f): f is FlavorId => !!f) as FlavorId[]
+  return { tickets, collection, flavors }
+}
 
 // If native never delivers a collection, stop waiting after this long rather
 // than spinning forever (offline / silent host). What shows then depends on
@@ -29,13 +63,18 @@ const isDevMode =
   typeof window !== 'undefined' && /[?&]dev=1\b/.test(window.location.search)
 
 // "Embedded" = running inside a native WebView host (not a desktop preview).
-// CSS flattens the phone-frame mockup when body.is-embedded is set.
+// CSS flattens the phone-frame mockup when body.is-embedded is set. The mock
+// native transport (dev/mock sessions) doesn't count — it exists to exercise
+// the bridge, not to signal a real WebView, and the desktop preview should
+// keep its phone frame.
 const isEmbedded =
-  typeof window !== 'undefined' && (
+  typeof window !== 'undefined' &&
+  !(window as unknown as { __MOCK_NATIVE__?: boolean }).__MOCK_NATIVE__ && (
     !!(window as unknown as { collectibles?: unknown }).collectibles ||
     !!window.webkit?.messageHandlers?.collectibles ||
     /[?&]embed=1\b/.test(window.location.search)
-  )
+  ) ||
+  typeof window !== 'undefined' && /[?&]embed=1\b/.test(window.location.search)
 
 interface Selection {
   list: CollectibleEntry[]
@@ -43,13 +82,35 @@ interface Selection {
   originRect: DOMRect
 }
 
+interface CeremonyState {
+  requestIds: string[]
+  /** Snapshot of ticket + chosen item — immune to the collection
+   *  replacement that lands underneath mid-ceremony. */
+  entries: CeremonyEntry[]
+}
+
 export default function App() {
   const initial = useMemo(() => readInitialCollection(), [])
   const [items, setItems] = useState<OwnedNft[]>(initial.items)
+  const [tickets, setTickets] = useState<Ticket[]>(initial.tickets)
   const [displayName, setDisplayName] = useState<string | undefined>(initial.displayName)
   const [delivered, setDelivered] = useState<boolean>(hasDelivered())
   const [bootTimedOut, setBootTimedOut] = useState(false)
   const [selection, setSelection] = useState<Selection | null>(null)
+  // Ticket whose choose-your-item sheet is open.
+  const [picking, setPicking] = useState<TicketEntry | null>(null)
+  const [ceremony, setCeremony] = useState<CeremonyState | null>(null)
+  // The game→collectibles handoff (?arrival=1): a sealed bundle covers the
+  // screen until tapped; opening it replays the gallery entrance so the
+  // shelf "arrives". PRODUCTION: native routes here from the game's chest
+  // moment — the param mocks that routing.
+  const [arrival, setArrival] = useState<boolean>(
+    () => /[?&]arrival=1\b/.test(window.location.search)
+  )
+  const [arrivalGen, setArrivalGen] = useState(0)
+  // Send flow: first pick who gets it, then the in-flight overlay.
+  const [choosingRecipient, setChoosingRecipient] = useState<CollectibleEntry | null>(null)
+  const [sending, setSending] = useState<{ requestId: string; entry: CollectibleEntry; recipient: string } | null>(null)
   // First-run intro — shown once over the first populated gallery view.
   const [showIntro, setShowIntro] = useState(false)
   const introChecked = useRef(false)
@@ -68,6 +129,7 @@ export default function App() {
   // Resolve raw NFTs → display entries. Memoized so we only re-resolve when
   // the owned set actually changes.
   const entries = useMemo(() => buildEntries(items), [items])
+  const ticketEntries = useMemo(() => buildTicketEntries(tickets), [tickets])
   // Always-current entries, so the deferred gallery_shown fire below reports
   // the live count rather than a value captured when the effect first ran.
   const entriesRef = useRef(entries)
@@ -76,7 +138,8 @@ export default function App() {
   // Subscribe to native collection deliveries (initial + late + streamed).
   useEffect(() => {
     const off = subscribeCollection((next) => {
-      setItems(next)
+      setItems(next.items)
+      setTickets(next.tickets)
       setDelivered(hasDelivered())
       setCollectionGen(getCollectionGeneration())
       // Surface to native when we capped an oversized delivery (so it learns
@@ -105,12 +168,20 @@ export default function App() {
   // No native required. Matches the first whitespace-delimited word of a
   // DEV_MOCKS label (e.g. ?mock=typical, ?mock=rare, ?mock=collector).
   useEffect(() => {
+    // Composed axis params (from the dev panel's shareable URLs) win…
+    const axes = readAxisParams()
+    if (axes) {
+      loadScenario(composeScenario(axes.tickets, axes.collection, axes.flavors))
+      return
+    }
+    // …else the legacy ?mock= aliases still work.
     const param = new URLSearchParams(window.location.search).get('mock')
     if (!param) return
     const mock = DEV_MOCKS.find((m) => m.label.toLowerCase().startsWith(param.toLowerCase()))
     if (!mock) return
-    const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
-    w.setCollection?.(mock.build())
+    // Route through the mock native so it can mirror the scenario and arm
+    // ticket state flips — the same path a real delivery would take.
+    loadScenario(mock.build())
   }, [])
 
   // Tag <body> when embedded so CSS flattens the desktop phone frame.
@@ -229,19 +300,78 @@ export default function App() {
     sendFlowEvent({ type: 'flow.item_opened', hash: hash.startsWith('0x') ? hash : `0x${hash}` })
   }
 
-  // Dev helper: load a mock collection via the registered native global.
-  // setCollection replaces the store wholesale and notifies subscribers, so
-  // no resetCollection() is needed here — and calling it would be wrong, as
-  // it clears the listener set (including this component's own subscription).
-  function loadMock(build: () => CollectionInput): void {
+  /** Mint the item the player chose for a ticket (choose-your-item).
+   *
+   *  PRODUCTION: everything after sendBridgeRequest is native's show —
+   *  approval sheet (PGAS-sponsored, no fee), merkle proof, signing,
+   *  Asset Hub claim submission — streamed back as RequestUpdates and
+   *  finished with a wholesale setCollection of the new chain truth. */
+  function mintChosen(ticket: TicketEntry, collectionId: string, item: CatalogItem): void {
+    if (ceremony) return
+    const requestId = newRequestId()
+    sendBridgeRequest({
+      type: 'request.mint',
+      requestId,
+      mints: [{ ticketHash: ticket.hashHex, collectionId, itemIndex: item.index }]
+    })
+    setPicking(null)
+    setCeremony({
+      requestIds: [requestId],
+      entries: [{
+        hash: ticket.hash,
+        shortCode: ticket.shortCode,
+        collectionId,
+        preview: item.resolved
+      }]
+    })
+  }
+
+  /** Send: the recipient sheet resolves WHO (recent contact or username
+   *  lookup), the request carries the handle, and the SendOverlay rides
+   *  the update stream. The post-transfer truth delivery removes the item
+   *  and closes the stale detail view via the generation bump. */
+  function startSend(entry: CollectibleEntry): void {
+    if (sending || choosingRecipient) return
+    setChoosingRecipient(entry)
+  }
+
+  function sendTo(entry: CollectibleEntry, recipient: string): void {
+    const requestId = newRequestId()
+    sendBridgeRequest({ type: 'request.send', requestId, itemHash: entry.hashHex, recipient })
+    setChoosingRecipient(null)
+    setSending({ requestId, entry, recipient })
+  }
+
+  /** UJ-6: ask native to deep-link into the item's game. Fire-and-mostly-
+   *  forget — native suspends the webview when it routes; the detail view
+   *  just shows a brief "opening…" note. */
+  function openGame(entry: CollectibleEntry): void {
+    if (!entry.gameLink) return
+    sendBridgeRequest({ type: 'request.open_game', requestId: newRequestId(), url: entry.gameLink.url })
+  }
+
+  // Dev helper: load a composed scenario through the mock native (mirrors
+  // the scenario + arms ticket flips). setCollection replaces the store
+  // wholesale and notifies subscribers, so no resetCollection() is needed
+  // here — and calling it would be wrong, as it clears the listener set
+  // (including this component's own subscription).
+  function loadDevScenario(input: CollectionInput): void {
     setSelection(null)
-    const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
-    w.setCollection?.(build())
+    setCeremony(null)
+    setSending(null)
+    setPicking(null)
+    // A new scenario dismisses a lingering chest — otherwise the arrival
+    // overlay from a previous state sits on top of every state after it.
+    setArrival(false)
+    loadScenario(input)
   }
 
   // Boot screen only while there's nothing to show: cache-seeded entries
   // render at once even though native hasn't spoken yet.
-  const showBoot = !delivered && !bootTimedOut && entries.length === 0
+  const showBoot = !delivered && !bootTimedOut && entries.length === 0 && ticketEntries.length === 0
+  // A fresh player with tickets but no minted items still gets the gallery
+  // (mint-first shelf over an empty grid), not the empty state.
+  const showGallery = !showBoot && (entries.length > 0 || ticketEntries.length > 0)
 
   return (
     <div className="page">
@@ -253,11 +383,13 @@ export default function App() {
             <div className="boot-copy">Opening your collection…</div>
           </div>
         )}
-        {!showBoot && entries.length === 0 && <EmptyGallery {...(displayName ? { displayName } : {})} />}
-        {!showBoot && entries.length > 0 && (
+        {!showBoot && !showGallery && <EmptyGallery {...(displayName ? { displayName } : {})} />}
+        {showGallery && (
           <GalleryScreen
-            key={collectionGen}
+            key={`${collectionGen}-${arrivalGen}`}
             entries={entries}
+            tickets={ticketEntries}
+            onPickTicket={setPicking}
             {...(displayName ? { displayName } : {})}
             onOpen={handleOpen}
           />
@@ -273,6 +405,59 @@ export default function App() {
             originRect={selection.originRect}
             onClose={handleClose}
             onShow={handleShow}
+            onSend={startSend}
+            onOpenGame={openGame}
+          />
+        )}
+
+        {choosingRecipient && (
+          <RecipientPicker
+            entry={choosingRecipient}
+            onPick={(username) => sendTo(choosingRecipient, username)}
+            onClose={() => setChoosingRecipient(null)}
+          />
+        )}
+
+        {sending && (
+          <SendOverlay
+            requestId={sending.requestId}
+            entry={sending.entry}
+            recipient={sending.recipient}
+            onDone={() => setSending(null)}
+          />
+        )}
+
+        {picking && (
+          <ItemPicker
+            entry={picking}
+            onMint={(collectionId, item) => mintChosen(picking, collectionId, item)}
+            onClose={() => setPicking(null)}
+          />
+        )}
+
+        {/* The ceremony deliberately lives OUTSIDE the generation-bump
+            cleanup above: the post-mint setCollection bumps the generation
+            mid-ceremony (that's the landing beat), and must not dismiss
+            the overlay the way it dismisses a stale detail view. */}
+        {ceremony && (
+          <MintCeremony
+            requestIds={ceremony.requestIds}
+            entries={ceremony.entries}
+            particles={particleRef}
+            frameRef={frameRef}
+            onDone={() => setCeremony(null)}
+          />
+        )}
+
+        {arrival && ticketEntries.length > 0 && (
+          <ChestArrival
+            ticketCount={ticketEntries.length}
+            particles={particleRef}
+            frameRef={frameRef}
+            onOpen={() => {
+              setArrival(false)
+              setArrivalGen((g) => g + 1) // replay the entrance underneath
+            }}
           />
         )}
 
@@ -281,36 +466,15 @@ export default function App() {
         )}
       </PhoneFrame>
 
+      <ThemeSwitcher />
+
       {isDevMode && (
-        <div className="dev-panel" role="group" aria-label="Dev mock collections">
-          <span className="dev-panel-label">↪ mock collection</span>
-          {DEV_MOCKS.map((m) => (
-            <button
-              key={m.label}
-              type="button"
-              className="dev-panel-btn"
-              onClick={() => loadMock(m.build)}
-            >
-              {m.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className="dev-panel-btn"
-            onClick={() => setShowIntro(true)}
-            title="Replay the first-run intro (bypasses the localStorage gate)"
-          >
-            ↻ intro
-          </button>
-          <button
-            type="button"
-            className="dev-panel-btn dev-panel-btn--reload"
-            onClick={() => window.location.reload()}
-            title="Reload to reset all state"
-          >
-            ↻ reload
-          </button>
-        </div>
+        <DevPanel
+          onScenario={loadDevScenario}
+          onChest={() => setArrival(true)}
+          onIntro={() => setShowIntro(true)}
+          {...(readAxisParams() ? { initial: readAxisParams()! } : {})}
+        />
       )}
     </div>
   )

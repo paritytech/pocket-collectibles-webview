@@ -223,6 +223,25 @@ const { normal: NORMAL_KEYS, rare: RARE_KEYS, place: COLLECTION_PLACE } = indexC
 /** Total number of distinct images in the catalogue (normal + rare). */
 export const CATALOGUE_SIZE = NORMAL_KEYS.length + RARE_KEYS.length
 
+/** Size of one rarity pool — the index space for `entryAt`. */
+export function poolSize(rarity: Rarity): number {
+  return (rarity === 'rare' ? RARE_KEYS : NORMAL_KEYS).length
+}
+
+/** Resolve a catalogue entry by pool position (choose-your-item flows
+ *  browse the pools directly instead of deriving from a hash). Index wraps
+ *  so callers can offset freely. */
+export function entryAt(rarity: Rarity, index: number): ResolvedCollectible {
+  const pool = rarity === 'rare' ? RARE_KEYS : NORMAL_KEYS
+  if (pool.length === 0) throw new Error('collectible pools are empty')
+  const key = pool[((index % pool.length) + pool.length) % pool.length]!
+  return { ...materialize(key), rarity, isRare: rarity === 'rare' }
+}
+
+/** Rare band width, exported for ticket-rarity derivation (bytes 0–1 of a
+ *  credit hash roll under this → the ticket entitles a RARE mint). */
+export { RARE_THRESHOLD }
+
 /** Lazily turn a catalogue key into a displayable PoolEntry, memoized so a
  *  repeated resolve (a popular image, a re-render, or the malformed-hash
  *  fallback) never rebuilds the URL/name. Only ever called for entries the

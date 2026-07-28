@@ -44,6 +44,20 @@ export interface OwnedNft {
    *  not yet finalised into `Nfts`. Renders in a dimmed "pending" state
    *  with no mint date. Defaults to false (a confirmed mint). */
   pending?: boolean
+  /** OPTIONAL (bridge v2): the registry id of the collection this item was
+   *  minted into (PRODUCTION: native maps the pallet_nfts collection id to
+   *  the claim-pallet registry entry). Drives collection labels + sort. */
+  collectionId?: string
+  /** OPTIONAL (bridge v2): set when the item can't be transferred right
+   *  now, with a player-worded reason the UI shows verbatim (PRD: "if a
+   *  transfer is blocked, the UI shows why"). PRODUCTION sources: item or
+   *  collection transfer locks, a future cooldown (UJ-5). */
+  transferBlocked?: { reason: string }
+  /** OPTIONAL (bridge v2, UJ-6): the game this item is playable in.
+   *  PRODUCTION: from the collection's jollity_api metadata (the
+   *  game-link field the PRD asks to freeze into the interface). Absent →
+   *  no game action shown. */
+  gameLink?: { label: string; url: string }
 }
 
 export interface CollectionInput {
@@ -55,6 +69,133 @@ export interface CollectionInput {
   /** Optional display name for the header, e.g. "ERIN". Max 24 chars;
    *  native should sanitize. */
   displayName?: string
+  /** OPTIONAL (bridge v2, additive per the §12 versioning rules): unminted
+   *  claim credits, rendered as "tickets" with previews and a mint flow.
+   *  v1 hosts that omit this field get the classic owned-only gallery. */
+  tickets?: Ticket[]
+}
+
+// ---- Bridge v2: tickets + mint requests (all additive) -------------------
+//
+// PRODUCTION SOURCE: tickets are the player's claim credits on the People
+// Chain (Game pallet storage). Native reads them alongside `Nfts` /
+// `NftCandidates` and delivers them here. They become mintable once the
+// merkle root covering them has reached the Asset Hub claim pallet via XCM.
+
+export type TicketState =
+  /** Credit exists on the People Chain but its merkle root hasn't been
+   *  synced to Asset Hub yet — visible, previewable, but a mint would fail.
+   *  Native watches the root sync and re-delivers when it lands. */
+  | 'finalizing'
+  /** Provable against the synced root: mint away. */
+  | 'mintable'
+
+/** An unminted claim credit. Tickets are NOT bound to a collection or an
+ *  outcome — they entitle the holder to mint ONE item of the ticket's
+ *  RARITY TIER, chosen by the player from any registered collection. The
+ *  tier is derived from the hash's rarity band (bytes 0–1), the same roll
+ *  the games use, so a ticket visibly promises "a rare" or "a common". */
+export interface Ticket {
+  /** 32-byte credit hash, 64 hex chars, optional 0x prefix — same
+   *  normalization rules as OwnedNft.hash. */
+  hash: string
+  state: TicketState
+  /** The game cycle this credit belongs to (pallet-scarcity-people groups
+   *  credits into cycles; the merkle root is sealed per cycle). Native
+   *  needs it to build proofs/claims — the page just passes it through. */
+  cycleId?: number
+  /** Unix seconds when the credit is cleaned from the People Chain (end of
+   *  the retention window). Drives all expiry UX; omit only if unknown.
+   *  NOTE: the current runtime has NO time-based expiry — cleanup happens
+   *  only when a cycle is fully claimed — so until a retention TTL lands
+   *  on-chain, this value is product policy supplied by native. */
+  expiresAt?: number
+}
+
+/** Web → native commands (bridge v2). Every request carries a web-generated
+ *  `requestId`; native answers each one via `window.deliverRequestUpdate`,
+ *  always reaching a terminal status. Posted on the same `collectibles`
+ *  transport as FlowEvent. */
+export type BridgeRequest =
+  | {
+      type: 'request.mint'
+      requestId: string
+      /** CHOOSE-YOUR-ITEM model: each ticket mints a specific item the
+       *  player picked from a collection's catalog (constrained to the
+       *  ticket's rarity tier). ⚠ PRODUCTION: this is a NEW runtime
+       *  requirement — the current claim pallet derives the item id from
+       *  the credit's entropy; player-selected items need the selector /
+       *  claim call to accept a choice (plus supply & uniqueness rules).
+       *  Raise with the runtime team before this flow is scheduled. */
+      mints: Array<{
+        ticketHash: string        // must be a `mintable` credit
+        collectionId: string
+        /** Index of the chosen item in the collection's catalog for the
+         *  ticket's rarity tier (mock-level reference; production would
+         *  carry the catalog item id from jollity_api). */
+        itemIndex: number
+      }>
+    }
+  | {
+      type: 'request.send'
+      requestId: string
+      /** Hash of the owned item to transfer. */
+      itemHash: string
+      /** Asset Hub address, if the page already knows it. Omitted → native
+       *  presents its contact picker and reports the chosen recipient in
+       *  the update stream (PRODUCTION: contacts live native-side; the
+       *  page never sees the address book). */
+      recipient?: string
+    }
+  | {
+      type: 'request.open_game'
+      requestId: string
+      /** The item's gameLink.url. PRODUCTION: native deep-links into the
+       *  game client (or its DIM route); the webview never navigates
+       *  itself. Native acks via deliverRequestUpdate (done | failed). */
+      url: string
+    }
+
+/** Coarse request state. Terminal: 'done' (per-item results attached),
+ *  'failed' (request-level error), 'rejected' (user declined in the native
+ *  approval sheet — a choice, not an error). */
+export type RequestStatus =
+  | 'received'
+  | 'awaitingApproval'
+  | 'building'
+  | 'submitted'
+  | 'inBlock'
+  | 'done'
+  | 'failed'
+  | 'rejected'
+
+export interface RequestItemUpdate {
+  ticketHash: string
+  /** Batches are NON-ATOMIC: each ticket succeeds or fails on its own. A
+   *  failed ticket's credit is NEVER consumed — it stays mintable. */
+  status: 'pending' | 'minted' | 'failed'
+  /** The minted item's hash on success. Always equals the previewed
+   *  outcome — minting contracts are deterministic and immutable. */
+  itemId?: string
+  /** Human-readable failure reason, shown to the user as-is. */
+  reason?: string
+}
+
+/** Native → web progress/result stream for one request, injected via
+ *  `window.deliverRequestUpdate` (registered in bridge/requests.ts). */
+export interface RequestUpdate {
+  requestId: string
+  status: RequestStatus
+  /** 0..1, meaningful during 'building' (merkle proof construction — a
+   *  backgroundable native job, never a blocking spinner in the UI). */
+  progress?: number
+  /** Per-ticket outcomes; authoritative once status reaches 'inBlock'. */
+  items?: RequestItemUpdate[]
+  /** For request.send: who the item is going to (display handle), known
+   *  once the native contact picker resolves. */
+  recipient?: string
+  /** Request-level reason for 'failed' / 'rejected'. */
+  reason?: string
 }
 
 // Web→native events. Native may ignore any of these; they exist for

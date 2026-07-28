@@ -14,16 +14,27 @@
 // are registered at module load so native can call them before React
 // mounts without anything being dropped.
 
-import type { CollectionInput, OwnedNft } from './types'
+import type { CollectionInput, OwnedNft, Ticket, TicketState } from './types'
 import { loadCachedCollection, saveCachedCollection } from './collectionCache'
 
-type Listener = (items: OwnedNft[]) => void
+/** Everything the channel knows, delivered as one snapshot: owned items
+ *  plus (bridge v2) unminted tickets. v1 hosts never send tickets, so the
+ *  array is simply always empty for them. */
+export interface CollectionSnapshot {
+  items: OwnedNft[]
+  tickets: Ticket[]
+}
+
+type Listener = (snap: CollectionSnapshot) => void
 
 // Hard cap on how many items we keep. Native is NOT trusted to send a sane
 // count — without this a runaway/whale payload would build tens of thousands
 // of DOM nodes + image loads and lock the WebView. Excess NEW items are
 // dropped (and counted, see getDroppedCount); existing keys still update.
 const MAX_OWNED = 500
+// Tickets cap. A single game yields ~5–10 credits and they expire, so any
+// realistic shelf is small; the cap only guards against a hostile payload.
+const MAX_TICKETS = 50
 // Plausible Unix-seconds range for a mint time. Anything outside (e.g. a
 // millisecond value sent where seconds were expected, or garbage) is treated
 // as unknown rather than rendered as a year-50000 date / "Invalid Date".
@@ -33,6 +44,9 @@ const TS_MAX = 4102444800 // 2100-01-01
 // Keyed by normalized hash (lowercase, no 0x). The value keeps the
 // hash in its original normalized form plus the latest metadata.
 const store = new Map<string, OwnedNft>()
+// Unminted claim credits, keyed the same way. Replaced wholesale by
+// setCollection; pushNft never touches tickets (it streams owned items).
+const ticketStore = new Map<string, Ticket>()
 const listeners = new Set<Listener>()
 // Display name arrives alongside the collection; cached separately so a
 // later pushNft doesn't clobber it.
@@ -98,15 +112,51 @@ function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
   const mintedAt = coerceMintedAt(obj.mintedAt)
   if (mintedAt !== undefined) item.mintedAt = mintedAt
   if (truthyFlag(obj.pending)) item.pending = true
+  if (typeof obj.collectionId === 'string' && obj.collectionId) {
+    item.collectionId = obj.collectionId
+  }
+  const blocked = obj.transferBlocked as Record<string, unknown> | undefined
+  if (blocked && typeof blocked === 'object' && typeof blocked.reason === 'string' && blocked.reason) {
+    item.transferBlocked = { reason: blocked.reason }
+  }
+  const game = obj.gameLink as Record<string, unknown> | undefined
+  if (
+    game && typeof game === 'object' &&
+    typeof game.label === 'string' && game.label &&
+    typeof game.url === 'string' && game.url
+  ) {
+    item.gameLink = { label: game.label, url: game.url }
+  }
   return { key, item }
 }
 
+/** Coerce an arbitrary object into a clean Ticket, or null. State strings
+ *  outside the whitelist default to 'mintable' rather than dropping the
+ *  ticket — a newer native adding states must never hide credits from the
+ *  user; showing them as mintable at worst yields a failed-mint message,
+ *  never a silent loss. */
+function coerceTicket(raw: unknown): { key: string; ticket: Ticket } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  const key = normalizeKey(obj.hash)
+  if (!key) return null
+  const state: TicketState = obj.state === 'finalizing' ? 'finalizing' : 'mintable'
+  const ticket: Ticket = { hash: key, state }
+  // Reuses the mint-time sanity window: an expiry is a Unix-seconds value in
+  // the same plausible range, and garbage should read as "unknown", not 1970.
+  const expiresAt = coerceMintedAt(obj.expiresAt)
+  if (expiresAt !== undefined) ticket.expiresAt = expiresAt
+  return { key, ticket }
+}
+
 function notify(): void {
-  const snapshot = snapshotItems()
+  const snapshot = snapshot_()
   // Piggyback the last-known-good cache write on the coalesced notify, so a
   // pushNft burst costs one localStorage write, not one per item. Only after
   // a real native delivery — never write the cache-seeded data back to itself.
-  if (delivered) saveCachedCollection(snapshot, displayName)
+  // Tickets are deliberately NOT cached: a stale expiry / stale state is
+  // worse than a blank shelf, and native re-delivers tickets on every boot.
+  if (delivered) saveCachedCollection(snapshot.items, displayName)
   for (const cb of listeners) {
     try { cb(snapshot) } catch { /* a listener throwing can't break the channel */ }
   }
@@ -123,15 +173,21 @@ function scheduleNotify(): void {
 }
 
 /** Stable signature of the current key set, so setCollection can tell a real
- *  change from a same-content refresh (and only then remount the gallery). */
+ *  change from a same-content refresh (and only then remount the gallery).
+ *  OWNED-ONLY on purpose: a tickets-only redelivery (a finalizing→mintable
+ *  flip, an expiry tick) re-notifies subscribers but must NOT bump the
+ *  generation — the gallery would remount and replay its entrance over a
+ *  change the user perceives as a chip flipping. A post-mint delivery
+ *  changes the owned keys, bumps the generation, and the entrance replay IS
+ *  the landing beat of the ceremony. */
 function signatureOf(): string {
   return Array.from(store.keys()).sort().join(',')
 }
 
-/** Current owned set as a fresh array. Order is insertion order; the UI
- *  applies its own sort, so we don't sort here. */
-function snapshotItems(): OwnedNft[] {
-  return Array.from(store.values())
+/** Current owned + ticket sets as fresh arrays. Order is insertion order;
+ *  the UI applies its own sort, so we don't sort here. */
+function snapshot_(): CollectionSnapshot {
+  return { items: Array.from(store.values()), tickets: Array.from(ticketStore.values()) }
 }
 
 /** Replace the whole store from a payload. Returns false (and changes
@@ -153,6 +209,18 @@ function ingestCollection(input: unknown): boolean {
   }
   if (droppedCount > 0) {
     console.warn(`[collection] owned set exceeded ${MAX_OWNED}; dropped ${droppedCount} item(s)`)
+  }
+  // Tickets (bridge v2, optional). Wholesale replace, like `owned`: a
+  // delivery without the field clears the shelf — native always sends the
+  // complete current set, never a delta.
+  ticketStore.clear()
+  if (Array.isArray(obj.tickets)) {
+    for (const raw of obj.tickets) {
+      const coerced = coerceTicket(raw)
+      if (!coerced) continue
+      if (!ticketStore.has(coerced.key) && ticketStore.size >= MAX_TICKETS) continue
+      ticketStore.set(coerced.key, coerced.ticket)
+    }
   }
   if (typeof obj.displayName === 'string') {
     displayName = sanitizeDisplayName(obj.displayName)
@@ -228,9 +296,9 @@ function sanitizeDisplayName(v: string): string | undefined {
 /** Snapshot of the collection captured at module load (before React
  *  mounts). Used to seed initial state so the first render isn't empty
  *  when native set the global early. */
-export function readInitialCollection(): { items: OwnedNft[]; displayName?: string } {
+export function readInitialCollection(): CollectionSnapshot & { displayName?: string } {
   return {
-    items: snapshotItems(),
+    ...snapshot_(),
     ...(displayName ? { displayName } : {})
   }
 }
@@ -240,7 +308,7 @@ export function readInitialCollection(): { items: OwnedNft[]; displayName?: stri
  *  unsubscribe function. */
 export function subscribeCollection(cb: Listener): () => void {
   listeners.add(cb)
-  try { cb(snapshotItems()) } catch { /* see notify() */ }
+  try { cb(snapshot_()) } catch { /* see notify() */ }
   return () => { listeners.delete(cb) }
 }
 
@@ -273,6 +341,7 @@ export function getDroppedCount(): number {
  *  in production. */
 export function resetCollection(): void {
   store.clear()
+  ticketStore.clear()
   listeners.clear()
   displayName = undefined
   delivered = false

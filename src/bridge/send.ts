@@ -18,39 +18,46 @@ declare global {
   }
 }
 
-export function sendFlowEvent(event: FlowEvent): void {
+/** Post any payload to native over the detected transport. Shared by
+ *  `sendFlowEvent` (telemetry) and `sendBridgeRequest` (bridge v2 commands,
+ *  see requests.ts) so there is exactly one transport implementation. */
+export function postToNative(payload: { type: string }): void {
   try {
-    // Dev-only: assert the event survives a JSON round-trip cleanly, so
-    // future event variants that accidentally carry non-serializable
-    // fields (Date, BigInt, undefined) are caught before they manifest
-    // as an Android-only bug. Production behavior unchanged.
+    // Dev-only: assert the payload survives a JSON round-trip cleanly, so
+    // future variants that accidentally carry non-serializable fields
+    // (Date, BigInt, undefined) are caught before they manifest as an
+    // Android-only bug. Production behavior unchanged.
     if (import.meta.env.DEV) {
       try {
-        const round = JSON.parse(JSON.stringify(event))
-        if (round?.type !== event.type) {
-          console.warn('[bridge] event lost type field after round-trip', event)
+        const round = JSON.parse(JSON.stringify(payload))
+        if (round?.type !== payload.type) {
+          console.warn('[bridge] payload lost type field after round-trip', payload)
         }
       } catch (rtErr) {
-        console.warn('[bridge] event failed JSON round-trip', event, rtErr)
+        console.warn('[bridge] payload failed JSON round-trip', payload, rtErr)
       }
     }
 
     const ios = window.webkit?.messageHandlers?.[BRIDGE_NAME]
     if (ios && typeof ios.postMessage === 'function') {
-      ios.postMessage(event)
+      ios.postMessage(payload)
       return
     }
     const android = (window as unknown as Record<string, unknown>)[BRIDGE_NAME] as AndroidBridge | undefined
     if (android && typeof android.postMessage === 'function') {
-      android.postMessage(JSON.stringify(event))
+      android.postMessage(JSON.stringify(payload))
       return
     }
     if (typeof console !== 'undefined') {
-      console.debug('[bridge]', event)
+      console.debug('[bridge]', payload)
     }
   } catch (err) {
     if (typeof console !== 'undefined') {
       console.warn('[bridge] send failed', err)
     }
   }
+}
+
+export function sendFlowEvent(event: FlowEvent): void {
+  postToNative(event)
 }

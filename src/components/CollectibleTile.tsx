@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react'
 import type { CollectibleEntry } from '../collectibles/format'
-import { formatRelative } from '../collectibles/format'
 import { haptic } from '../haptics/engine'
 
 interface CollectibleTileProps {
@@ -100,10 +99,10 @@ export default function CollectibleTile({ entry, onOpen }: CollectibleTileProps)
       </div>
       <div className="tile-meta">
         <span className="tile-name">{resolved.name}</span>
+        {/* Just the collection — when it was minted lives in the detail
+            view; the grid doesn't need a ticking clock. */}
         <span className="tile-sub">
-          <span className="tile-collection">{resolved.collection || entry.shortCode}</span>
-          <span className="tile-dot">·</span>
-          <span className="tile-when">{formatRelative(entry.mintedAt)}</span>
+          <span className="tile-collection">{entry.collectionLabel || entry.shortCode}</span>
         </span>
       </div>
     </button>

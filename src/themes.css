@@ -1,0 +1,839 @@
+/* ============================================================
+   Design variations, selected via URL: ?theme=<name>
+   (main.tsx sets data-theme on <html> before first paint).
+
+   Everything flows through the custom properties in styles.css;
+   the extra selectors below only retint surfaces whose colors are
+   baked into gradients there. No component knows a theme exists.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   Theme switcher — the design-review rail on the right edge.
+   Theme-agnostic chrome; floats OVER every variation.
+   ------------------------------------------------------------ */
+.theme-switch {
+  position: fixed;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.theme-switch-btn {
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(235, 233, 245, 0.72);
+  background: rgba(16, 15, 24, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+}
+.theme-switch-btn:active { transform: scale(0.94); }
+.theme-switch-btn.is-active {
+  color: #fff;
+  background: rgba(81, 99, 245, 0.85);
+  border-color: rgba(140, 152, 255, 0.7);
+}
+.theme-switch-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* Trading-card furniture in the detail view (rendered by DetailScreen,
+   aria-hidden): invisible everywhere except themes that use it. */
+.detail-cardline, .detail-cardtext { display: none; }
+/* Narrow (full-bleed / on-device) screens: the vertical mid-right rail
+   would sit on top of content — tuck it into a compact bottom-center row
+   instead. On desktop preview it stays beside the phone frame. */
+@media (max-width: 719px) {
+  .theme-switch {
+    top: auto;
+    right: 50%;
+    bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    transform: translateX(50%);
+    flex-direction: row;
+    gap: 5px;
+  }
+  .theme-switch-btn { padding: 6px 8px; font-size: 9px; border-radius: 8px; }
+}
+
+/* ------------------------------------------------------------
+   GILDED — Art Deco collector's cabinet.
+   Deep emerald dark, champagne/brass metals, Cinzel capitals.
+   The mint moment is a jewellery reveal.
+   ------------------------------------------------------------ */
+html[data-theme='gilded'] {
+  --bg-radial:
+    radial-gradient(ellipse 130% 72% at 50% 0%, #0e231d 0%, #071510 52%, #040f0a 100%);
+  --accent: #c9a24b;
+  --accent-bright: #e6c777;
+  --accent-deep: #7f6420;
+  --accent-glow: rgba(212, 175, 95, 0.42);
+  --cyan: #9be3c9;
+  --gold: #f0c75e;
+  --gold-deep: #ffdf8e;
+  --gold-glow: rgba(240, 199, 94, 0.5);
+  --ink-1: rgba(247, 241, 224, 0.96);
+  --ink-2: rgba(226, 216, 189, 0.68);
+  --ink-3: rgba(206, 196, 168, 0.44);
+  --line: rgba(212, 175, 95, 0.18);
+  --surface: rgba(14, 38, 31, 0.6);
+  --surface-2: rgba(20, 50, 41, 0.55);
+  --font-title: "Cinzel", "Mulish", serif;
+}
+/* Title's gradient fill, retinted champagne. */
+html[data-theme='gilded'] .gallery-title {
+  background: linear-gradient(180deg, #fdf6e3 0%, #e2c37a 100%);
+  -webkit-background-clip: text; background-clip: text;
+}
+/* Deco typography: display capitals, architectural letterspacing. */
+html[data-theme='gilded'] .gallery-title,
+html[data-theme='gilded'] .picker-title,
+html[data-theme='gilded'] .ceremony-summary-text,
+html[data-theme='gilded'] .detail-name,
+html[data-theme='gilded'] .ticket-shelf-title {
+  letter-spacing: 0.07em;
+  font-weight: 700;
+}
+/* Emerald-velvet cells behind the floating items. */
+html[data-theme='gilded'] .tile-frame,
+html[data-theme='gilded'] .ceremony-card-inner {
+  background: radial-gradient(circle at 50% 48%, #10281f 0%, #081810 70%, #051009 100%);
+}
+html[data-theme='gilded'] .ticket-frame {
+  background: radial-gradient(circle at 50% 44%, #10281f 0%, #081810 72%, #051009 100%);
+  border-color: rgba(212, 175, 95, 0.4); /* brass perforation */
+}
+html[data-theme='gilded'] .ceremony-card-inner { border-color: rgba(212, 175, 95, 0.4); }
+html[data-theme='gilded'] .ceremony-scrim { background: rgba(2, 10, 7, 0.9); }
+html[data-theme='gilded'] .picker-sheet,
+html[data-theme='gilded'] .infotip-card {
+  background: rgba(11, 31, 25, 0.97);
+  border-color: rgba(212, 175, 95, 0.28);
+}
+html[data-theme='gilded'] .picker-thumb-wrap {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--glow, 212 175 95) / 0.28) 0%, transparent 70%),
+    radial-gradient(circle at 50% 48%, #10281f 0%, #081810 80%);
+}
+html[data-theme='gilded'] .detail-backdrop,
+html[data-theme='gilded'] .detail--rare .detail-backdrop {
+  background:
+    radial-gradient(ellipse 48% 92% at 50% 46%, rgb(var(--glow, 212 175 95) / 0.3), transparent 66%),
+    rgba(3, 12, 9, 0.9);
+}
+html[data-theme='gilded'] .tile-count-badge,
+html[data-theme='gilded'] .ticket-expiry-chip,
+html[data-theme='gilded'] .ceremony-fail-chip {
+  background: rgba(5, 16, 12, 0.68);
+  border-color: rgba(212, 175, 95, 0.24);
+}
+/* A whisper of a deco sunburst behind the mint hero action. */
+html[data-theme='gilded'] .mint-all-btn {
+  border: 1px solid rgba(255, 240, 200, 0.55);
+  box-shadow: 0 6px 22px var(--gold-glow), inset 0 1px 0 rgba(255, 250, 230, 0.6);
+}
+
+/* ---- GILDED layout: the salon wall ----
+   Symmetry and ceremony: a centered header under an ornament rule, a
+   mosaic wall where rare pieces hang wide, and tickets presented as
+   tilted showcase cards on a pedestal row. */
+html[data-theme='gilded'] .gallery-header { text-align: center; }
+html[data-theme='gilded'] .gallery-stats { justify-content: center; }
+html[data-theme='gilded'] .gallery-title::after {
+  /* hairline rule with a center diamond — pure ornament, deco demands it */
+  content: '';
+  display: block;
+  width: 140px; height: 7px;
+  margin: 12px auto 0;
+  background:
+    radial-gradient(circle, var(--accent-bright) 0 2px, transparent 2.6px) center / 8px 8px no-repeat,
+    linear-gradient(90deg, transparent, var(--accent) 18%, var(--accent) 82%, transparent) center / 100% 1px no-repeat;
+}
+html[data-theme='gilded'] .gallery-grid { grid-auto-flow: dense; gap: 16px; }
+/* Rare pieces hang wide — a two-column frame in the mosaic. */
+html[data-theme='gilded'] .tile--rare { grid-column: span 2; }
+html[data-theme='gilded'] .tile--rare .tile-frame { aspect-ratio: 2 / 1.12; }
+html[data-theme='gilded'] .tile--rare .tile-art-wrap { inset: 7% 22%; }
+html[data-theme='gilded'] .tile-meta { text-align: center; }
+/* Tickets: larger showcase cards, double brass frame, alternating tilt
+   (on the frame, not the card — GSAP owns the card's transform). */
+html[data-theme='gilded'] .ticket-shelf-head {
+  flex-direction: column; align-items: center; gap: 10px;
+}
+html[data-theme='gilded'] .ticket-rail {
+  justify-content: safe center;
+  gap: 18px; padding-top: 8px;
+}
+html[data-theme='gilded'] .ticket-card { flex: 0 0 156px; }
+html[data-theme='gilded'] .ticket-meta { max-width: 156px; text-align: center; }
+html[data-theme='gilded'] .ticket-frame {
+  border: 1px solid rgba(212, 175, 95, 0.5);
+  box-shadow:
+    inset 0 0 0 4px rgba(4, 15, 10, 0.9),
+    inset 0 0 0 5px rgba(212, 175, 95, 0.35);
+}
+html[data-theme='gilded'] .ticket-card:nth-child(odd) .ticket-frame { transform: rotate(-1.7deg); }
+html[data-theme='gilded'] .ticket-card:nth-child(even) .ticket-frame { transform: rotate(1.4deg); }
+html[data-theme='gilded'] .ticket-card:active .ticket-frame { transform: scale(0.96); }
+
+
+/* The catalog number — a CSS counter, set right like a plate reference. */
+/* Tickets: same register, stacked. */
+/* On a 74px thumb two chips is a crowd: the countdown keeps its corner,
+   the state chip retires — a finalizing row is dimmed and pulsing, which
+   says the same thing without a label (aria-label still spells it out). */
+/* The seal: one full-width vermilion action under the title. */
+
+/* ------------------------------------------------------------
+   ARCANA — trading-card game. Every collectible is a CARD:
+   dark arcane table, card bodies with ornate double borders, a
+   name plate under the art window, mythic-gold frames for rares.
+   ------------------------------------------------------------ */
+html[data-theme='arcana'] {
+  --bg-radial:
+    radial-gradient(ellipse 130% 72% at 50% 0%, #1c1229 0%, #110a1c 52%, #0a0613 100%);
+  --accent: #9b59d0;
+  --accent-bright: #bd7ff0;
+  --accent-deep: #5f2f8a;
+  --accent-glow: rgba(155, 89, 208, 0.45);
+  --gold: #e8b64c;
+  --gold-deep: #f6d27c;
+  --gold-glow: rgba(232, 182, 76, 0.5);
+  --ink-1: rgba(244, 238, 252, 0.96);
+  --ink-2: rgba(216, 204, 232, 0.68);
+  --ink-3: rgba(190, 178, 210, 0.44);
+  --line: rgba(155, 89, 208, 0.2);
+  --surface: rgba(34, 24, 52, 0.62);
+  --surface-2: rgba(44, 32, 66, 0.55);
+  --font-title: "Grenze", "Mulish", serif;
+}
+html[data-theme='arcana'] .gallery-title {
+  background: linear-gradient(180deg, #f4eeff 0%, #c9a9f0 100%);
+  -webkit-background-clip: text; background-clip: text;
+  letter-spacing: 0.01em;
+}
+/* THE CARD: the tile itself becomes the card body; the art sits in a
+   framed window; the meta becomes the name plate. */
+html[data-theme='arcana'] .gallery-grid { gap: 14px; }
+html[data-theme='arcana'] .tile {
+  background: linear-gradient(180deg, #2b2140 0%, #1c1530 60%, #171128 100%);
+  border: 2px solid #40325e;
+  border-radius: 14px;
+  padding: 7px 7px 8px;
+  box-shadow:
+    inset 0 0 0 1px rgba(189, 127, 240, 0.14),
+    0 6px 18px rgba(0, 0, 0, 0.45);
+}
+html[data-theme='arcana'] .tile-frame {
+  border-radius: 8px;
+  border: 1px solid #4a3a70;
+  background: radial-gradient(circle at 50% 48%, #241b3a 0%, #150f26 74%, #0e0a1c 100%);
+}
+html[data-theme='arcana'] .tile-meta {
+  margin-top: 7px;
+  padding: 5px 6px 6px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid #3b2e58;
+  text-align: center;
+}
+html[data-theme='arcana'] .tile-name {
+  font-family: "Grenze", serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+html[data-theme='arcana'] .tile-sub { justify-content: center; }
+/* Mythic frame for rares: the card border itself goes gold. */
+html[data-theme='arcana'] .tile--rare {
+  border-color: #c9a24b;
+  box-shadow:
+    inset 0 0 0 1px rgba(246, 210, 124, 0.35),
+    0 0 22px rgba(232, 182, 76, 0.22),
+    0 6px 18px rgba(0, 0, 0, 0.45);
+}
+html[data-theme='arcana'] .tile--rare .tile-meta { border-color: rgba(201, 162, 75, 0.5); }
+/* Tickets: unrevealed cards — same body, arcane dashed window. */
+html[data-theme='arcana'] .ticket-card {
+  flex-basis: 138px;
+  background: linear-gradient(180deg, #2b2140 0%, #1c1530 60%, #171128 100%);
+  border: 2px solid #40325e;
+  border-radius: 14px;
+  padding: 7px;
+}
+html[data-theme='arcana'] .ticket-frame {
+  border-radius: 8px;
+  border: 1px dashed rgba(189, 127, 240, 0.45);
+  background: radial-gradient(circle at 50% 44%, #241b3a 0%, #150f26 76%, #0e0a1c 100%);
+}
+html[data-theme='arcana'] .ticket-meta { max-width: none; text-align: center; padding-top: 6px; }
+html[data-theme='arcana'] .ceremony-card-inner {
+  background: radial-gradient(circle at 50% 44%, #241b3a 0%, #150f26 76%, #0e0a1c 100%);
+  border: 1px dashed rgba(189, 127, 240, 0.45);
+}
+html[data-theme='arcana'] .ceremony-scrim { background: rgba(8, 4, 16, 0.9); }
+html[data-theme='arcana'] .picker-sheet,
+html[data-theme='arcana'] .infotip-card {
+  background: rgba(28, 20, 44, 0.97);
+  border-color: rgba(155, 89, 208, 0.32);
+}
+html[data-theme='arcana'] .picker-thumb-wrap {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--glow, 155 89 208) / 0.26) 0%, transparent 70%),
+    radial-gradient(circle at 50% 48%, #241b3a 0%, #150f26 80%);
+}
+html[data-theme='arcana'] .detail-backdrop,
+html[data-theme='arcana'] .detail--rare .detail-backdrop {
+  background:
+    radial-gradient(ellipse 48% 92% at 50% 46%, rgb(var(--glow, 155 89 208) / 0.3), transparent 66%),
+    rgba(10, 5, 18, 0.9);
+}
+html[data-theme='arcana'] .tile-count-badge,
+html[data-theme='arcana'] .ticket-expiry-chip,
+html[data-theme='arcana'] .ceremony-fail-chip {
+  background: rgba(14, 9, 26, 0.72);
+  border-color: rgba(155, 89, 208, 0.3);
+}
+
+/* Deck view sizing: arcana's card bodies (padding + name plate) run
+   taller than plain tiles. */
+html[data-theme='arcana'] .deck-stage { aspect-ratio: 3 / 4.65; }
+html[data-theme='arcana'] .collection-title { letter-spacing: 0.04em; }
+
+/* ---- ARCANA detail view: THE card ----
+   The detail becomes one full trading card: dark outer frame carried by
+   thick side borders on each stacked section, parchment title bar (name +
+   mana-style gem), dark art window, type line, and the facts panel as the
+   parchment text box with a collector number at the bottom. */
+html[data-theme='arcana'] .detail-scroll { --cardw: min(88%, 346px); }
+html[data-theme='arcana'] .detail-cardline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: var(--cardw);
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #efe4c9, #dccba6);
+  border-left: 9px solid #17111f;
+  border-right: 9px solid #17111f;
+  box-shadow: inset 0 0 0 1px #8a7648;
+  color: #241c0c;
+  font-family: 'Grenze', serif;
+}
+html[data-theme='arcana'] .detail-cardline--title {
+  position: relative;
+  z-index: 2; /* over the rare rays spilling from the art window below */
+  border-top: 9px solid #17111f;
+  border-radius: 20px 20px 0 0;
+  font-size: 19px;
+  font-weight: 700;
+}
+html[data-theme='arcana'] .detail-cardline-name {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+html[data-theme='arcana'] .detail-cardline-gem {
+  flex: 0 0 auto;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgb(var(--glow, 155 89 208)), #221a33 85%);
+  border: 1px solid #241c0c;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+html[data-theme='arcana'] .detail-cardline--type {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+}
+html[data-theme='arcana'] .detail-cardline-set { color: #6b5a33; font-size: 12px; }
+html[data-theme='arcana'] .detail--rare .detail-cardline-set { color: #a97d0e; }
+/* Art window between the bars. */
+html[data-theme='arcana'] .detail-stage {
+  width: var(--cardw);
+  margin-top: 0;
+  border-left: 9px solid #17111f;
+  border-right: 9px solid #17111f;
+  background: radial-gradient(circle at 50% 46%, #241b3a 0%, #140e24 78%, #0d0919 100%);
+  box-shadow: inset 0 0 0 1px #8a7648;
+  padding: 12px 0;
+}
+html[data-theme='arcana'] .detail-hero { width: min(78%, 300px); }
+html[data-theme='arcana'] .detail-hero-glow { inset: -4%; filter: blur(7px); }
+/* Text box: the facts panel goes parchment. */
+html[data-theme='arcana'] .detail-panel {
+  width: var(--cardw);
+  margin-top: 0;
+  border-radius: 0 0 20px 20px;
+  border: 0;
+  border-left: 9px solid #17111f;
+  border-right: 9px solid #17111f;
+  border-bottom: 11px solid #17111f;
+  background: linear-gradient(180deg, #f2e8d0, #e4d5b2);
+  box-shadow: inset 0 0 0 1px #8a7648;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Rare: the whole card wears a gold inner line + an outer aura. */
+html[data-theme='arcana'] .detail--rare .detail-cardline,
+html[data-theme='arcana'] .detail--rare .detail-stage,
+html[data-theme='arcana'] .detail--rare .detail-panel {
+  box-shadow: inset 0 0 0 1px #c9a24b;
+}
+html[data-theme='arcana'] .detail--rare .detail-panel {
+  box-shadow: inset 0 0 0 1px #c9a24b, 0 18px 50px rgba(232, 182, 76, 0.18);
+}
+/* Name + pill live in the title bar; the facts TABLE gives way to the
+   card-native text box (prose + stat box + collector line) — no tables on
+   a trading card. */
+html[data-theme='arcana'] .detail-titlerow { display: none; }
+html[data-theme='arcana'] .detail-facts { display: none; }
+/* NOTE: no position:relative here — the stat box anchors to the PANEL, so
+   it hangs on the card's lower-right frame like a real P/T box instead of
+   climbing onto short rules text. */
+html[data-theme='arcana'] .detail-cardtext {
+  display: block;
+  padding: 2px 2px 6px;
+  font-family: 'Grenze', serif;
+  color: #241c0c;
+}
+html[data-theme='arcana'] .detail-cardtext-line {
+  margin: 0 0 8px;
+  font-size: 15.5px;
+  line-height: 1.45;
+}
+html[data-theme='arcana'] .detail-cardtext-flavor {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid rgba(90, 70, 30, 0.28);
+  font-size: 14.5px;
+  line-height: 1.45;
+  font-style: italic;
+  color: rgba(36, 28, 12, 0.72);
+}
+/* The power/toughness-style stat box, bottom-right, overlapping the text
+   box edge — carries the drop rate (or ×N owned). */
+html[data-theme='arcana'] .detail-cardtext-pt {
+  position: absolute;
+  right: 14px;
+  bottom: -16px;  /* juts past the card's outer frame, MTG P/T-style */
+  z-index: 2;
+  padding: 6px 15px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #efe4c9, #dccba6);
+  border: 2px solid #17111f;
+  box-shadow: inset 0 0 0 1px #8a7648;
+  font-family: 'Grenze', serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #241c0c;
+}
+/* Rare: the exact gold pill the gallery tiles wear. */
+html[data-theme='arcana'] .detail-cardtext-pt--rare {
+  background: linear-gradient(180deg, var(--gold-deep), var(--gold));
+  border-color: #17111f;
+  box-shadow: 0 3px 14px var(--gold-glow);
+  font-weight: 800;
+  color: #2a1c00;
+}
+/* Collector line at the very bottom of the card, MTG-fashion:
+   "R 0076/424 · 7F3A·9C2B". */
+html[data-theme='arcana'] .detail-panel::after {
+  content: attr(data-rarity) ' ' attr(data-num) ' · ' attr(data-code);
+  display: block;
+  margin-top: 14px;
+  padding-right: 96px; /* keep clear of the stat box on the right */
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: rgba(36, 28, 12, 0.45);
+}
+/* Send flows below the card frame; extra top gap clears the rarity badge
+   jutting off the bottom edge. */
+html[data-theme='arcana'] .detail-send-wrap { width: var(--cardw); margin-top: 28px; }
+
+/* ------------------------------------------------------------
+   LOOT — RPG inventory. Collectibles are ITEMS in a dense grid
+   of beveled slots on dark leather; rarity speaks through the
+   slot's border color and the item name's tint (epic purple).
+   ------------------------------------------------------------ */
+html[data-theme='loot'] {
+  --bg-radial:
+    radial-gradient(ellipse 130% 72% at 50% 0%, #262019 0%, #171310 52%, #0d0b08 100%);
+  --accent: #d9a441;
+  --accent-bright: #f0c25e;
+  --accent-deep: #8f6a1e;
+  --accent-glow: rgba(217, 164, 65, 0.4);
+  --gold: #d9a441;
+  --gold-deep: #f0c25e;
+  --gold-glow: rgba(217, 164, 65, 0.45);
+  --ink-1: rgba(240, 232, 216, 0.95);
+  --ink-2: rgba(210, 198, 176, 0.68);
+  --ink-3: rgba(180, 168, 146, 0.45);
+  --line: rgba(217, 164, 65, 0.16);
+  --surface: rgba(38, 32, 24, 0.7);
+  --surface-2: rgba(48, 40, 30, 0.6);
+  --font-title: "MedievalSharp", "Mulish", cursive;
+}
+html[data-theme='loot'] .gallery-title {
+  background: linear-gradient(180deg, #f6ead0 0%, #d9a441 100%);
+  -webkit-background-clip: text; background-clip: text;
+  letter-spacing: 0.01em;
+}
+/* Inventory density: three slots across, tight gaps. */
+html[data-theme='loot'] .gallery-grid { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+html[data-theme='loot'] .tile-frame {
+  border-radius: 9px;
+  background: linear-gradient(160deg, #26211a 0%, #17130e 100%);
+  border: 1px solid #453c2c;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.55);
+}
+html[data-theme='loot'] .tile-meta { padding: 6px 2px 2px; }
+html[data-theme='loot'] .tile-name {
+  font-size: 12px;
+  color: #d8d2c2; /* "common" quality tint */
+}
+html[data-theme='loot'] .tile-sub { font-size: 10px; }
+/* Epic quality: purple slot ring + purple item name. */
+html[data-theme='loot'] .tile--rare .tile-frame {
+  border-color: #a335ee;
+  box-shadow:
+    0 0 14px rgba(163, 53, 238, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.55);
+}
+html[data-theme='loot'] .tile--rare .tile-name { color: #c77dff; }
+html[data-theme='loot'] .tile-rare-badge {
+  color: #fff;
+  background: linear-gradient(180deg, #b45cf5, #8b2fd6);
+  box-shadow: 0 2px 8px rgba(163, 53, 238, 0.45);
+}
+html[data-theme='loot'] .tile--rare .tile-glow-blob {
+  background: radial-gradient(ellipse 52% 70% at 50% 48%,
+    rgb(199 125 255 / 0.5) 0%,
+    rgb(163 53 238 / 0.3) 30%,
+    transparent 62%);
+}
+/* Tickets: quest rewards — gold-riveted slots awaiting collection. */
+html[data-theme='loot'] .ticket-card { flex: 0 0 116px; }
+html[data-theme='loot'] .ticket-mystery-word { font-size: 14px; }
+html[data-theme='loot'] .ticket-frame {
+  border-radius: 9px;
+  background: linear-gradient(160deg, #26211a 0%, #17130e 100%);
+  border: 1px dashed rgba(217, 164, 65, 0.55);
+  box-shadow: inset 0 -3px 8px rgba(0, 0, 0, 0.55);
+}
+html[data-theme='loot'] .ticket-shelf {
+  padding: 12px;
+  margin: 10px 0 8px;
+  border: 1px solid #453c2c;
+  border-radius: 12px;
+  background: rgba(30, 25, 18, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+html[data-theme='loot'] .mint-all-btn {
+  border: 1px solid #f6d67c;
+  border-radius: 9px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 248, 220, 0.7),
+    inset 0 -2px 4px rgba(90, 60, 0, 0.45),
+    0 4px 12px rgba(0, 0, 0, 0.5);
+}
+html[data-theme='loot'] .sort-row {
+  border-radius: 9px;
+  background: rgba(20, 16, 11, 0.7);
+  border: 1px solid #453c2c;
+}
+html[data-theme='loot'] .sort-chip { border-radius: 7px; }
+html[data-theme='loot'] .ceremony-card-inner {
+  background: linear-gradient(160deg, #26211a 0%, #17130e 100%);
+  border: 1px dashed rgba(217, 164, 65, 0.55);
+}
+html[data-theme='loot'] .ceremony-scrim { background: rgba(8, 6, 3, 0.9); }
+html[data-theme='loot'] .picker-sheet,
+html[data-theme='loot'] .infotip-card {
+  background: rgba(32, 26, 18, 0.97);
+  border-color: rgba(217, 164, 65, 0.3);
+}
+html[data-theme='loot'] .picker-thumb-wrap {
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--glow, 217 164 65) / 0.24) 0%, transparent 70%),
+    linear-gradient(160deg, #26211a 0%, #17130e 100%);
+}
+html[data-theme='loot'] .detail-backdrop,
+html[data-theme='loot'] .detail--rare .detail-backdrop {
+  background:
+    radial-gradient(ellipse 48% 92% at 50% 46%, rgb(var(--glow, 217 164 65) / 0.26), transparent 66%),
+    rgba(10, 8, 4, 0.9);
+}
+html[data-theme='loot'] .tile-count-badge,
+html[data-theme='loot'] .ticket-expiry-chip,
+html[data-theme='loot'] .ceremony-fail-chip {
+  background: rgba(15, 12, 7, 0.75);
+  border-color: rgba(217, 164, 65, 0.3);
+}
+
+/* ------------------------------------------------------------
+   Expiring tickets (<24h): beyond the gold glow, the ticket's
+   BACKGROUND itself goes warm yellow. Lives at the end of the
+   cascade so it outranks every theme's own frame background.
+   ------------------------------------------------------------ */
+html .ticket-card--expiring .ticket-frame {
+  background: radial-gradient(circle at 50% 50%,
+    #4d3c10 0%, #2b2007 68%, #1a1304 100%);
+  border-color: rgba(255, 202, 40, 0.55);
+}
+
+
+/* ------------------------------------------------------------
+   PIXEL — retro handheld. Flat slate dark, chunky hard-shadow
+   cards with pixel corners, Press Start 2P headings, VT323 body,
+   a pixel-grid screen over every art window, and the detail's
+   facts table styled as a Top-Trumps stat block.
+   ------------------------------------------------------------ */
+html[data-theme='pixel'] {
+  --bg-radial: linear-gradient(180deg, #14171f 0%, #101319 100%);
+  --accent: #57e389;
+  --accent-bright: #7dedaa;
+  --accent-deep: #2f9c58;
+  --accent-glow: rgba(87, 227, 137, 0.35);
+  --cyan: #6cc6ff;
+  --gold: #f7c94a;
+  --gold-deep: #ffe082;
+  --gold-glow: rgba(247, 201, 74, 0.45);
+  --ink-1: rgba(235, 240, 250, 0.96);
+  --ink-2: rgba(190, 200, 218, 0.7);
+  --ink-3: rgba(150, 160, 180, 0.5);
+  --line: rgba(255, 255, 255, 0.12);
+  --surface: rgba(30, 34, 44, 0.92);
+  --surface-2: rgba(38, 43, 55, 0.9);
+  --font-title: "Press Start 2P", "Mulish", monospace;
+  --font-ui: "VT323", "Inter", monospace;
+  --font-mono: "VT323", ui-monospace, monospace;
+}
+/* Press Start 2P runs HUGE — scale headings down and let it breathe. */
+html[data-theme='pixel'] .gallery-title {
+  font-size: clamp(15px, 4.6vw, 19px);
+  line-height: 1.5;
+  letter-spacing: 0;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--ink-1);
+}
+html[data-theme='pixel'] .collection-title,
+html[data-theme='pixel'] .ticket-shelf-title { font-size: 11px; }
+html[data-theme='pixel'] .picker-title,
+html[data-theme='pixel'] .ceremony-summary-text,
+html[data-theme='pixel'] .chest-title { font-size: 14px; line-height: 1.6; }
+html[data-theme='pixel'] .detail-name { font-size: 13px; line-height: 1.6; }
+html[data-theme='pixel'] .tile-name { font-family: var(--font-ui); font-size: 17px; }
+html[data-theme='pixel'] .tile-sub,
+html[data-theme='pixel'] .gallery-stats { font-size: 15px; }
+html[data-theme='pixel'] body,
+html[data-theme='pixel'] .sort-chip,
+html[data-theme='pixel'] .collection-search-input { font-family: var(--font-ui); }
+html[data-theme='pixel'] .sort-chip { font-size: 15px; padding: 5px 12px; }
+/* Chunky cartridge cells: small radius, hard 2px edge, offset shadow. */
+html[data-theme='pixel'] .tile-frame,
+html[data-theme='pixel'] .ceremony-card-inner {
+  border-radius: 6px;
+  background: #1e222c;
+  border: 2px solid #343b49;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
+}
+html[data-theme='pixel'] .ticket-frame {
+  border-radius: 6px;
+  background: #1e222c;
+  border: 2px dashed #485062;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
+}
+html[data-theme='pixel'] .tile--rare .tile-frame {
+  border-color: var(--gold);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45), 0 0 16px var(--gold-glow);
+}
+/* The chrome is pixel; the ART is not. The images are canonical assets
+   used in games and elsewhere — they must read exactly as they are, so no
+   grid overlay, no image-rendering tricks, no filters. */
+html[data-theme='pixel'] .tile-bloom { display: none; } /* soft glow ≠ pixels */
+html[data-theme='pixel'] .tile-glow-blob {
+  background: radial-gradient(circle at 50% 48%,
+    rgb(var(--glow, 87 227 137) / 0.32) 0%, transparent 62%);
+}
+/* Buttons press like buttons. */
+html[data-theme='pixel'] .mint-all-btn,
+html[data-theme='pixel'] .detail-play,
+html[data-theme='pixel'] .ceremony-done-btn {
+  border-radius: 6px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  letter-spacing: 0;
+  border: 2px solid rgba(0, 0, 0, 0.55);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+  transition: transform 0.06s steps(1), box-shadow 0.06s steps(1);
+}
+html[data-theme='pixel'] .mint-all-btn:active,
+html[data-theme='pixel'] .detail-play:active,
+html[data-theme='pixel'] .ceremony-done-btn:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.55);
+}
+/* Sheets + overlays go flat slate with hard edges. */
+html[data-theme='pixel'] .picker-sheet,
+html[data-theme='pixel'] .infotip-card {
+  background: #1b1f28;
+  border: 2px solid #343b49;
+  border-radius: 10px 10px 0 0;
+}
+html[data-theme='pixel'] .picker-thumb-wrap {
+  border-radius: 6px;
+  background: #232837;
+  border: 2px solid #343b49;
+}
+html[data-theme='pixel'] .detail-backdrop,
+html[data-theme='pixel'] .detail--rare .detail-backdrop {
+  background:
+    radial-gradient(ellipse 48% 92% at 50% 46%, rgb(var(--glow, 87 227 137) / 0.18), transparent 66%),
+    rgba(12, 14, 19, 0.94);
+}
+/* Detail facts as the Top-Trumps stat block: label left, BIG value right. */
+html[data-theme='pixel'] .detail-panel {
+  border-radius: 8px;
+  background: #1b1f28;
+  border: 2px solid #343b49;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-theme='pixel'] .fact dt {
+  font-family: "Press Start 2P", monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+html[data-theme='pixel'] .fact dd {
+  font-family: var(--font-ui);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-1);
+}
+html[data-theme='pixel'] .rarity-pill--rare { border-radius: 5px; }
+html[data-theme='pixel'] .ticket-mystery-word {
+  font-family: "Press Start 2P", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+}
+html[data-theme='pixel'] .ticket-mystery-eyebrow { font-family: var(--font-ui); font-size: 11px; }
+html[data-theme='pixel'] .ticket-expiry-chip { font-size: 12px; border-radius: 5px; }
+html[data-theme='pixel'] .tile-count-badge { border-radius: 5px; }
+html[data-theme='pixel'] .collection-search { border-radius: 6px; border: 2px solid #343b49; }
+html[data-theme='pixel'] .collection-search-input { font-size: 17px; }
+html[data-theme='pixel'] .ceremony-scrim { background: rgba(10, 12, 17, 0.94); }
+html[data-theme='pixel'] .sendo-card { border-radius: 8px; border: 2px solid #343b49; }
+
+/* Pixel: Send is the quiet bordered action under the stat box. */
+html[data-theme='pixel'] .detail-send--live {
+  border-radius: 6px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  border: 2px solid #485062;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.45);
+}
+html[data-theme='pixel'] .detail-send--live:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0.45);
+}
+
+/* ------------------------------------------------------------
+   Per-style ticket designs. Gilded + Pixel keep the base
+   carnival ticket; Ethereal, Arcana and Loot each get their own.
+   (The expiring-yellow background outranks all of these by
+   specificity, so the warning survives every shape.)
+   ------------------------------------------------------------ */
+
+/* ETHEREAL — the halo capsule: a stadium-shaped charm with ripple
+   rings radiating from the center. Modern, weightless, no dashes. */
+html:not([data-theme]) .ticket-frame {
+  border-radius: 999px;
+  border: 1px solid rgb(var(--glow, 134 146 255) / 0.5);
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+html:not([data-theme]) .ticket-burst {
+  inset: 0;
+  background: repeating-radial-gradient(circle at 50% 50%,
+    rgb(var(--glow, 134 146 255) / 0.13) 0 2px, transparent 2px 15px);
+  -webkit-mask: radial-gradient(circle at 50% 50%, #000 0%, transparent 74%);
+  mask: radial-gradient(circle at 50% 50%, #000 0%, transparent 74%);
+}
+html:not([data-theme]) .ticket-mystery-word {
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-size: 16px;
+  letter-spacing: 0.14em;
+}
+
+/* ARCANA — the tarot minor: straight corners, a double ring frame,
+   moonlight pooling at the top over a faint field of stars. */
+html[data-theme='arcana'] .ticket-frame {
+  border-radius: 5px;
+  border: 1px solid rgba(189, 127, 240, 0.5);
+  -webkit-mask-image: none;
+  mask-image: none;
+  box-shadow:
+    inset 0 0 0 4px #1a1330,
+    inset 0 0 0 5px rgba(189, 127, 240, 0.4);
+}
+html[data-theme='arcana'] .ticket-burst {
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 24%, rgb(var(--glow, 155 89 208) / 0.38) 0%,
+      rgb(var(--glow, 155 89 208) / 0.12) 22%, transparent 46%),
+    radial-gradient(circle, rgba(255, 255, 255, 0.22) 0 1px, transparent 1.6px);
+  background-size: auto, 24px 24px;
+  -webkit-mask: none;
+  mask: none;
+}
+html[data-theme='arcana'] .ticket-mystery { gap: 9px; }
+html[data-theme='arcana'] .ticket-mystery-eyebrow {
+  font-family: 'Grenze', serif;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+}
+html[data-theme='arcana'] .ticket-mystery-word {
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+
+/* LOOT — the bounty token: octagon-cut slab of engraved metal with a
+   rarity-tinted ring, like a coin waiting in a quest slot. */
+html[data-theme='loot'] .ticket-frame {
+  clip-path: polygon(
+    14px 0, calc(100% - 14px) 0, 100% 14px, 100% calc(100% - 14px),
+    calc(100% - 14px) 100%, 14px 100%, 0 calc(100% - 14px), 0 14px);
+  border: none;
+  border-radius: 0;
+  -webkit-mask-image: none;
+  mask-image: none;
+  background: linear-gradient(160deg, #2b251c 0%, #1a160f 100%);
+  box-shadow:
+    inset 0 0 0 2px rgb(var(--glow, 217 164 65) / 0.55),
+    inset 0 3px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -4px 10px rgba(0, 0, 0, 0.6);
+}
+html[data-theme='loot'] .ticket-burst {
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%,
+    rgb(var(--glow, 217 164 65) / 0.24) 0%, transparent 62%);
+  -webkit-mask: none;
+  mask: none;
+}
+html[data-theme='loot'] .ticket-mystery-word {
+  font-family: 'MedievalSharp', cursive;
+  font-size: 19px;
+  letter-spacing: 0.06em;
+}
