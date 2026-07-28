@@ -15,6 +15,14 @@ interface ItemPickerProps {
   /** Mint the chosen item: which collection, which catalog item. */
   onMint: (collectionId: string, item: CatalogItem) => void
   onClose: () => void
+  /** 'sheet' (default) is a modal bottom sheet — how it's reached from the
+   *  main screen. 'inline' is a full-screen step with no scrim, used inside
+   *  the guided post-game flow where it's the primary content, not an
+   *  interruption. */
+  variant?: 'sheet' | 'inline'
+  /** Label for the dismiss affordance ('inline' shows a real Back control
+   *  since there's no scrim to tap). */
+  backLabel?: string
 }
 
 /** Choose-your-item mint sheet: pick a collection, browse the items it
@@ -23,11 +31,12 @@ interface ItemPickerProps {
  *  PRODUCTION: catalogs come from each collection's jollity_api module,
  *  including live supply (an item can be minted out). ⚠ Player-chosen
  *  items also need runtime support — see BridgeRequest.request.mint. */
-export default function ItemPicker({ entry, onMint, onClose }: ItemPickerProps) {
+export default function ItemPicker({ entry, onMint, onClose, variant = 'sheet', backLabel = 'Cancel' }: ItemPickerProps) {
   const sheetRef = useRef<HTMLDivElement>(null)
   const scrimRef = useRef<HTMLDivElement>(null)
   const [collectionId, setCollectionId] = useState(DEFAULT_COLLECTION_ID)
   const [picked, setPicked] = useState<CatalogItem | null>(null)
+  const inline = variant === 'inline'
 
   const items = useMemo(
     () => collectionCatalog(collectionId, entry.rarity),
@@ -37,11 +46,17 @@ export default function ItemPicker({ entry, onMint, onClose }: ItemPickerProps) 
   useEffect(() => {
     if (prefersReducedMotion()) return
     const ctx = gsap.context(() => {
-      gsap.from(scrimRef.current, { opacity: 0, duration: 0.25, ease: EASE.entranceSoft })
-      gsap.from(sheetRef.current, { y: '100%', duration: 0.45, ease: EASE.entranceSoft })
+      // Inline: slide the panel in from the side (it's a flow step, not a
+      // sheet rising over content). Sheet: rise from the bottom + scrim.
+      if (inline) {
+        gsap.from(sheetRef.current, { x: 60, opacity: 0, duration: 0.4, ease: EASE.entranceSoft })
+      } else {
+        gsap.from(scrimRef.current, { opacity: 0, duration: 0.25, ease: EASE.entranceSoft })
+        gsap.from(sheetRef.current, { y: '100%', duration: 0.45, ease: EASE.entranceSoft })
+      }
     }, sheetRef)
     return () => ctx.revert()
-  }, [])
+  }, [inline])
 
   // Fresh grid entrance on collection switch. fromTo with explicit end
   // values + clearProps — a bare from() re-run under StrictMode captures a
@@ -68,10 +83,17 @@ export default function ItemPicker({ entry, onMint, onClose }: ItemPickerProps) 
   }, [onClose])
 
   return (
-    <div className="picker" role="dialog" aria-modal="true" aria-label="Choose what to mint">
-      <div className="picker-scrim" ref={scrimRef} onClick={onClose} />
+    <div
+      className={`picker${inline ? ' picker--inline' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Choose what to mint"
+    >
+      {!inline && <div className="picker-scrim" ref={scrimRef} onClick={onClose} />}
       <div className="picker-sheet" ref={sheetRef}>
-        <div className="picker-grip" aria-hidden="true" />
+        {inline
+          ? <button type="button" className="picker-back" onClick={onClose}><span aria-hidden="true">‹ </span>{backLabel}</button>
+          : <div className="picker-grip" aria-hidden="true" />}
         <h2 className="picker-title">
           Mint a {entry.rarity === 'rare' ? 'rare' : 'common'}
           {entry.rarity === 'rare' && <span className="picker-rare" aria-hidden="true"> ✦</span>}

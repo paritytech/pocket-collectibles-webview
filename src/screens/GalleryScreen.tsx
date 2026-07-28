@@ -32,7 +32,9 @@ const VIEW_LABELS: Record<ViewMode, string> = { grid: 'Grid', deck: 'Deck' }
 
 export default function GalleryScreen({ entries, displayName, tickets, onPickTicket, onOpen }: GalleryScreenProps) {
   const [sort, setSort] = useState<SortMode>('recent')
-  const [view, setView] = useState<ViewMode>('grid')
+  // Default to Deck wherever it's offered (arcana) — the card metaphor is
+  // the point there; effectiveView forces grid in themes without a deck.
+  const [view, setView] = useState<ViewMode>('deck')
   const [query, setQuery] = useState('')
   // Deck view belongs to the arcana (trading-card) variation only — the
   // toggle appears there and the choice is ignored everywhere else.

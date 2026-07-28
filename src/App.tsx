@@ -8,6 +8,7 @@ import ChestArrival from './components/ChestArrival'
 import DevPanel from './components/DevPanel'
 import ItemPicker from './components/ItemPicker'
 import MintCeremony, { type CeremonyEntry } from './components/MintCeremony'
+import PostGameFlow from './components/PostGameFlow'
 import RecipientPicker from './components/RecipientPicker'
 import SendOverlay from './components/SendOverlay'
 import ThemeSwitcher from './components/ThemeSwitcher'
@@ -23,7 +24,7 @@ import { sendFlowEvent } from './bridge/send'
 import { newRequestId, sendBridgeRequest } from './bridge/requests'
 import type { CollectionInput, OwnedNft, Ticket } from './bridge/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
-import { buildTicketEntries, type TicketEntry } from './collectibles/tickets'
+import { buildTicketEntries, isTicketExpired, type TicketEntry } from './collectibles/tickets'
 import type { CatalogItem } from './collectibles/mintCollections'
 import { loadScenario } from './mock/mockNative'
 import {
@@ -99,6 +100,10 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null)
   // Ticket whose choose-your-item sheet is open.
   const [picking, setPicking] = useState<TicketEntry | null>(null)
+  // Guided post-game flow: the chest's mintable tickets presented one by
+  // one (mint or skip). A snapshot queue — skipped/minted tickets stay
+  // consistent even as deliveries change the live shelf underneath.
+  const [guided, setGuided] = useState<{ queue: TicketEntry[]; index: number } | null>(null)
   const [ceremony, setCeremony] = useState<CeremonyState | null>(null)
   // The game→collectibles handoff (?arrival=1): a sealed bundle covers the
   // screen until tapped; opening it replays the gallery entrance so the
@@ -306,6 +311,25 @@ export default function App() {
    *  approval sheet (PGAS-sponsored, no fee), merkle proof, signing,
    *  Asset Hub claim submission — streamed back as RequestUpdates and
    *  finished with a wholesale setCollection of the new chain truth. */
+  /** Step the guided post-game flow forward; leaving the last ticket (or
+   *  skipping all) lands on the collection with a fresh entrance. */
+  function advanceGuided(): void {
+    setGuided((g) => {
+      if (!g) return null
+      const next = g.index + 1
+      if (next >= g.queue.length) {
+        setArrivalGen((n) => n + 1)
+        return null
+      }
+      return { ...g, index: next }
+    })
+  }
+
+  function exitGuided(): void {
+    setGuided(null)
+    setArrivalGen((n) => n + 1)
+  }
+
   function mintChosen(ticket: TicketEntry, collectionId: string, item: CatalogItem): void {
     if (ceremony) return
     const requestId = newRequestId()
@@ -360,9 +384,10 @@ export default function App() {
     setCeremony(null)
     setSending(null)
     setPicking(null)
-    // A new scenario dismisses a lingering chest — otherwise the arrival
-    // overlay from a previous state sits on top of every state after it.
+    // A new scenario dismisses a lingering chest / guided flow — otherwise
+    // overlays from a previous state sit on top of every state after it.
     setArrival(false)
+    setGuided(null)
     loadScenario(input)
   }
 
@@ -370,8 +395,12 @@ export default function App() {
   // render at once even though native hasn't spoken yet.
   const showBoot = !delivered && !bootTimedOut && entries.length === 0 && ticketEntries.length === 0
   // A fresh player with tickets but no minted items still gets the gallery
-  // (mint-first shelf over an empty grid), not the empty state.
-  const showGallery = !showBoot && (entries.length > 0 || ticketEntries.length > 0)
+  // (mint-first shelf over an empty grid), not the empty state. While a
+  // chest arrival or its guided flow is pending, the gallery stays hidden
+  // — the player hasn't "arrived" there yet, so it must never flash behind
+  // the overlay for a frame.
+  const showGallery =
+    !showBoot && (entries.length > 0 || ticketEntries.length > 0) && !arrival && !guided
 
   return (
     <div className="page">
@@ -383,7 +412,9 @@ export default function App() {
             <div className="boot-copy">Opening your collection…</div>
           </div>
         )}
-        {!showBoot && !showGallery && <EmptyGallery {...(displayName ? { displayName } : {})} />}
+        {!showBoot && !showGallery && !arrival && !guided && (
+          <EmptyGallery {...(displayName ? { displayName } : {})} />
+        )}
         {showGallery && (
           <GalleryScreen
             key={`${collectionGen}-${arrivalGen}`}
@@ -432,6 +463,10 @@ export default function App() {
             entry={picking}
             onMint={(collectionId, item) => mintChosen(picking, collectionId, item)}
             onClose={() => setPicking(null)}
+            // Inline (full-screen flow step) when reached from the guided
+            // post-game flow; a modal sheet when opened from the shelf.
+            variant={guided ? 'inline' : 'sheet'}
+            backLabel="Back"
           />
         )}
 
@@ -445,7 +480,12 @@ export default function App() {
             entries={ceremony.entries}
             particles={particleRef}
             frameRef={frameRef}
-            onDone={() => setCeremony(null)}
+            onDone={() => {
+              setCeremony(null)
+              // In the guided post-game flow, a finished mint moves on to
+              // the next ticket automatically.
+              if (guided) advanceGuided()
+            }}
           />
         )}
 
@@ -456,8 +496,24 @@ export default function App() {
             frameRef={frameRef}
             onOpen={() => {
               setArrival(false)
-              setArrivalGen((g) => g + 1) // replay the entrance underneath
+              // Opening the chest starts the guided mint-or-skip flow over
+              // the mintable tickets; with none mintable (all finalizing),
+              // fall through to the collection with a fresh entrance.
+              const queue = ticketEntries.filter((t) => t.state === 'mintable' && !isTicketExpired(t))
+              if (queue.length > 0) setGuided({ queue, index: 0 })
+              else setArrivalGen((g) => g + 1)
             }}
+          />
+        )}
+
+        {guided && guided.queue[guided.index] && !picking && !ceremony && (
+          <PostGameFlow
+            entry={guided.queue[guided.index]!}
+            index={guided.index}
+            total={guided.queue.length}
+            onMint={setPicking}
+            onSkip={advanceGuided}
+            onExit={exitGuided}
           />
         )}
 

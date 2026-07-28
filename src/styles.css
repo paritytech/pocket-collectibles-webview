@@ -742,7 +742,7 @@ button {
 
 /* ---------- Dev panel ---------- */
 .dev-panel {
-  position: fixed; bottom: 12px; left: 12px; z-index: 1000;
+  position: fixed; bottom: 12px; left: 12px; z-index: 40;
   display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
   padding: 8px 10px; max-width: 380px;
   background: rgba(20, 24, 44, 0.92);
@@ -1814,3 +1814,85 @@ button {
   content-visibility: auto;
   contain-intrinsic-size: auto 215px;
 }
+
+/* ---------- Guided post-game flow (mint or skip, one by one) ---------- */
+.pgflow {
+  position: absolute; inset: 0;
+  z-index: 350;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 26px;
+  padding: 24px;
+  background: rgba(4, 3, 9, 0.9);
+  backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+}
+.pgflow-copy { text-align: center; }
+.pgflow-counter {
+  font-family: var(--font-mono);
+  font-size: 12px; letter-spacing: 0.14em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+.pgflow-title {
+  margin: 6px 0 0;
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-size: clamp(22px, 6.5vw, 28px);
+  color: var(--ink-1);
+}
+.pgflow-card { width: min(64%, 250px); }
+.pgflow-card .ticket-card { width: 100%; }
+.pgflow-actions {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 12px;
+  width: min(80%, 320px);
+}
+.pgflow-mint { width: 100%; padding: 13px; border-radius: 12px; text-align: center; }
+.pgflow-skip {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  font-weight: 600; font-size: 14px;
+  color: var(--ink-1);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+}
+.pgflow-skip:focus-visible, .pgflow-exit:focus-visible {
+  outline: 2px solid var(--accent-bright); outline-offset: 2px;
+}
+.pgflow-exit {
+  padding: 6px;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+
+/* ---------- Item picker: inline variant (guided post-game step) ----------
+   No scrim, fills the frame as a flow step rather than a modal sheet. */
+.picker--inline {
+  display: flex; flex-direction: column;
+  background: var(--bg-radial);
+}
+.picker--inline .picker-sheet {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: max(20px, env(safe-area-inset-top, 0px)) 18px
+            calc(env(safe-area-inset-bottom, 0px) + 18px);
+}
+/* Grid takes the middle and scrolls; min-height:0 lets a flex child shrink
+   below its content so the Mint button stays pinned + reachable below. */
+.picker--inline .itempicker-grid { max-height: none; flex: 1; min-height: 0; }
+.picker--inline .itempicker-confirm { flex: 0 0 auto; }
+.picker-back {
+  align-self: flex-start;
+  margin-bottom: 10px;
+  padding: 6px 2px;
+  font-size: 14px; font-weight: 600;
+  color: var(--accent-bright);
+}
+.picker-back:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
