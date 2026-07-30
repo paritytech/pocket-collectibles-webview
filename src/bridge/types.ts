@@ -120,21 +120,18 @@ export type BridgeRequest =
   | {
       type: 'request.mint'
       requestId: string
-      /** CHOOSE-YOUR-ITEM model: each ticket mints a specific item the
-       *  player picked from a collection's catalog (constrained to the
-       *  ticket's rarity tier). ⚠ PRODUCTION: this is a NEW runtime
-       *  requirement — the current claim pallet derives the item id from
-       *  the credit's entropy; player-selected items need the selector /
-       *  claim call to accept a choice (plus supply & uniqueness rules).
-       *  Raise with the runtime team before this flow is scheduled. */
+      /** COLLECTION-ONLY model: each ticket mints into a chosen collection;
+       *  the collection's minting contract derives the item deterministically
+       *  from the credit hash (no per-item choice). Batch is the primary
+       *  path — one request carries every ticket being minted. */
       mints: Array<{
         ticketHash: string        // must be a `mintable` credit
         collectionId: string
-        /** Index of the chosen item in the collection's catalog for the
-         *  ticket's rarity tier (mock-level reference; production would
-         *  carry the catalog item id from jollity_api). */
-        itemIndex: number
       }>
+      /** DEV ONLY: compress the mock's staged timings so the reveal starts
+       *  immediately — for rapidly comparing the reveal experience. Native
+       *  ignores this. */
+      demo?: boolean
     }
   | {
       type: 'request.send'

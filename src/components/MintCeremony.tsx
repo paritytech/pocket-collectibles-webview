@@ -30,7 +30,20 @@ interface MintCeremonyProps {
   /** The phone frame, for viewport→frame coordinate translation (identity
    *  when embedded full-screen; corrects for the centered desktop frame). */
   frameRef: React.RefObject<HTMLDivElement | null>
+  /** How the (common) reveal is chosen: 'signature' gives each collection
+   *  a consistent look; 'random' surprises every time. Rares always
+   *  override with the epic charge regardless. */
+  variantMode?: 'signature' | 'random'
   onDone: () => void
+}
+
+/** Number of distinct common-reveal silhouettes (see buildCommonReveal). */
+const COMMON_VARIANT_COUNT = 10
+/** Stable hash of a string → variant index (signature-per-collection). */
+function hashIndex(s: string, n: number): number {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
+  return Math.abs(h) % n
 }
 
 // User-facing copy stays in the player's world — no crypto vocabulary
@@ -55,7 +68,7 @@ const WATCHDOG_MS = 20_000
  *  While this overlay waits in 'awaitingApproval', PRODUCTION native is
  *  showing its own transaction approval sheet over the WebView (PGAS
  *  sponsored, no fee shown). The webview just breathes underneath it. */
-export default function MintCeremony({ requestIds, entries, particles, frameRef, onDone }: MintCeremonyProps) {
+export default function MintCeremony({ requestIds, entries, particles, frameRef, variantMode = 'signature', onDone }: MintCeremonyProps) {
   const reduce = useMemo(() => prefersReducedMotion(), [])
   const rootRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -188,6 +201,168 @@ export default function MintCeremony({ requestIds, entries, particles, frameRef,
       return Math.min(3, (stageRect.width * 0.82) / r.width)
     }
 
+    /** RARE — a genuine event: spotlight, hot-gold charge, "RARE" banner,
+     *  screen shake, triple burst. Used for rares in single reveals. */
+    const revealRare = (el: HTMLElement, face: HTMLElement) => {
+      const banner = rootRef.current?.querySelector('.ceremony-rare-banner') as HTMLElement | null
+      tl.add(() => {
+        el.classList.add('is-charging')
+        rootRef.current?.classList.add('ceremony--spotlight')
+        haptic.play('threshold-cross')
+        particles.current?.nebulaWisps()
+      })
+      tl.to(el, { '--charge': 1, duration: 1.35, ease: 'power2.in' })
+      tl.add(() => { const c = cardCenter(el); particles.current?.legendaryFollowup(c.x, c.y); haptic.play('tap-view') }, '-=1.0')
+      tl.add(() => { const c = cardCenter(el); particles.current?.legendaryFollowup(c.x, c.y); haptic.play('tap-view') }, '-=0.6')
+      tl.add(() => { const c = cardCenter(el); particles.current?.legendaryFollowup(c.x, c.y); haptic.play('legendary-flip') }, '-=0.3')
+      tl.to(el, { scale: () => bigScale(el) * 1.06, duration: 0.16, ease: EASE.anticipation })
+      tl.add(() => el.classList.remove('is-charging'))
+      tl.to(face, { rotateY: 90, duration: 0.3, ease: EASE.flipIn })
+      tl.add(() => {
+        el.classList.add('is-minted')
+        const c = cardCenter(el)
+        particles.current?.legendaryBurst(c.x, c.y)
+        particles.current?.legendaryFollowup(c.x, c.y)
+        particles.current?.revealStarfield()
+        haptic.play('legendary-reveal')
+      })
+      if (rootRef.current) tl.fromTo(rootRef.current, { x: -8 }, { x: 0, duration: 0.5, ease: 'elastic.out(1.6, 0.25)' }, '<')
+      if (banner) {
+        tl.fromTo(banner, { scale: 1.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: EASE.impact }, '<')
+        tl.to(banner, { opacity: 0, duration: 0.4, ease: EASE.exit }, '+=0.9')
+      }
+      tl.to(face, { rotateY: 0, duration: 0.6, ease: EASE.settleSpring }, '<-0.1')
+      tl.to(el, { scale: () => bigScale(el), duration: 0.2 }, '<')
+      tl.add(() => rootRef.current?.classList.remove('ceremony--spotlight'), '+=0.6')
+    }
+
+    /** COMMON — one of ten reveals with genuinely different silhouettes
+     *  (flip, spin, iris-pop, barrel, drop-slam, swing, tumble, zoom-punch,
+     *  rise, shatter). Each conceals the sealed→art swap (behind a ≥90°
+     *  turn or a scale-through-zero). Signature-per-collection by default,
+     *  random when variantMode==='random'. Rares never use these. */
+    const revealCommon = (el: HTMLElement, face: HTMLElement, entry: CeremonyEntry) => {
+      const idx = variantMode === 'random'
+        ? Math.floor(Math.random() * COMMON_VARIANT_COUNT)
+        : hashIndex(entry.collectionId + entry.preview.name, COMMON_VARIANT_COUNT)
+      // Swap art in + burst — called at the concealed moment of each variant.
+      const reveal = (flavor: 'dust' | 'sparkle', h: Parameters<typeof haptic.play>[0]) => {
+        el.classList.add('is-minted')
+        const c = cardCenter(el)
+        if (flavor === 'sparkle') particles.current?.sparkleBurst(c.x, c.y)
+        else particles.current?.dustBurst(c.x, c.y)
+        haptic.play(h)
+      }
+      const B = () => bigScale(el)
+
+      switch (idx) {
+        case 0: // Flip Y — the classic card turn.
+          tl.to(face, { rotateY: 90, duration: 0.26, ease: EASE.flipIn })
+          tl.add(() => reveal('dust', 'reveal-burst'))
+          tl.to(face, { rotateY: 0, duration: 0.42, ease: EASE.settleSpring })
+          break
+        case 1: // Flip X — a vertical turn.
+          tl.to(face, { rotateX: 90, duration: 0.26, ease: EASE.flipIn })
+          tl.add(() => reveal('sparkle', 'reveal-burst'))
+          tl.to(face, { rotateX: 0, duration: 0.42, ease: EASE.settleSpring })
+          break
+        case 2: // Iris pop — collapses to nothing, bursts back (no flip).
+          tl.to(el, { scale: 0.01, rotation: -25, duration: 0.24, ease: 'power2.in' })
+          tl.add(() => reveal('sparkle', 'badge-land'))
+          tl.to(el, { scale: B, rotation: 0, duration: 0.55, ease: 'back.out(2.2)' })
+          break
+        case 3: // Coin spin — spins flat while turning over.
+          tl.to(el, { rotation: '+=380', duration: 0.62, ease: 'power2.inOut' })
+          tl.to(face, { rotateY: 90, duration: 0.2, ease: EASE.flipIn }, 0.16)
+          tl.add(() => reveal('dust', 'reveal-burst'), 0.34)
+          tl.to(face, { rotateY: 0, duration: 0.24, ease: EASE.settleSpring }, 0.34)
+          break
+        case 4: // Barrel roll — a full 360° tumble on Y.
+          tl.to(face, { rotateY: 360, duration: 0.7, ease: 'power2.inOut' })
+          tl.add(() => reveal('sparkle', 'reveal-burst'), 0.35)
+          break
+        case 5: // Drop slam — hoists up, slams down with a shake + flip.
+          tl.to(el, { y: '-=70', scale: () => B() * 0.94, duration: 0.22, ease: EASE.anticipation })
+          tl.to(face, { rotateX: 90, duration: 0.14, ease: EASE.flipIn })
+          tl.to(el, { y: '+=70', scale: B, duration: 0.16, ease: 'power3.in' }, '<')
+          tl.add(() => { reveal('dust', 'legendary-flip'); if (rootRef.current) gsap.fromTo(rootRef.current, { y: 6 }, { y: 0, duration: 0.4, ease: 'elastic.out(1.6, 0.3)' }) })
+          tl.to(face, { rotateX: 0, duration: 0.4, ease: EASE.settleSpring })
+          break
+        case 6: // Pendulum swing — swings in from an angle, flips, settles.
+          tl.to(el, { rotation: -16, duration: 0.18, ease: EASE.anticipation })
+          tl.to(face, { rotateY: 90, duration: 0.22, ease: EASE.flipIn })
+          tl.add(() => reveal('sparkle', 'reveal-burst'))
+          tl.to(face, { rotateY: 0, duration: 0.3, ease: EASE.settleSpring })
+          tl.to(el, { rotation: 0, duration: 0.55, ease: 'elastic.out(1, 0.45)' }, '<')
+          break
+        case 7: // Tumble — a full 360° flip on X.
+          tl.to(face, { rotateX: 360, duration: 0.7, ease: 'power2.inOut' })
+          tl.add(() => reveal('dust', 'reveal-burst'), 0.35)
+          break
+        case 8: // Zoom punch — lunges toward you, snaps the turn.
+          tl.to(el, { scale: () => B() * 1.28, duration: 0.18, ease: EASE.anticipation })
+          tl.to(face, { rotateY: 90, duration: 0.16, ease: EASE.flipIn })
+          tl.add(() => reveal('sparkle', 'legendary-flip'))
+          tl.to(face, { rotateY: 0, duration: 0.24, ease: EASE.impact })
+          tl.to(el, { scale: B, duration: 0.4, ease: EASE.settleSpring }, '<')
+          break
+        case 9: // Rise — sweeps up from below with a turn.
+          tl.to(el, { y: '+=90', duration: 0.2, ease: EASE.anticipation })
+          tl.to(face, { rotateY: 90, duration: 0.2, ease: EASE.flipIn })
+          tl.add(() => reveal('sparkle', 'reveal-burst'))
+          tl.to(face, { rotateY: 0, duration: 0.28, ease: EASE.settleSpring })
+          tl.to(el, { y: '-=90', duration: 0.5, ease: EASE.settleSoft }, '<')
+          break
+      }
+    }
+
+    // ---- Batch (Mint All) — a synchronized WAVE, not a queue -------------
+    if (entries.length > 1) {
+      const tl = gsap.timeline({ onComplete: () => setSettled(true) })
+      const anyRare = entries.some((e) => results.get(e.hash)?.status === 'minted' && e.preview.isRare)
+      const banner = rootRef.current?.querySelector('.ceremony-rare-banner') as HTMLElement | null
+      tl.add(() => haptic.play('collect-all-appear'), 0)
+      entries.forEach((entry, i) => {
+        const el = cardRefs.current[i]
+        const face = el?.querySelector('.ceremony-card-inner') as HTMLElement | null
+        if (!el || !face) return
+        const result = results.get(entry.hash)
+        const at = 0.25 + i * 0.13 // the ripple
+        const rare = result?.status === 'minted' && entry.preview.isRare
+        if (result?.status === 'minted') {
+          tl.to(face, { rotateY: 90, duration: 0.24, ease: EASE.flipIn }, at)
+          tl.add(() => {
+            el.classList.add('is-minted')
+            const c = cardCenter(el)
+            if (rare) { particles.current?.legendaryBurst(c.x, c.y); haptic.play('legendary-reveal') }
+            else { particles.current?.dustBurst(c.x, c.y); haptic.play('reveal-burst') }
+          }, at + 0.24)
+          tl.to(face, { rotateY: 0, duration: 0.4, ease: EASE.settleSpring }, at + 0.26)
+          if (rare) {
+            // A rare in the batch still gets "extra": it pops forward with
+            // a golden encore even amid the wave.
+            tl.to(el, { scale: 1.16, duration: 0.22, ease: EASE.anticipation }, at + 0.66)
+            tl.add(() => { const c = cardCenter(el); particles.current?.legendaryFollowup(c.x, c.y) }, at + 0.7)
+            tl.to(el, { scale: 1, duration: 0.42, ease: EASE.settleSoft }, at + 0.9)
+          }
+        } else {
+          tl.to(face, { rotateY: 50, duration: 0.24, ease: EASE.flipIn }, at)
+          tl.add(() => { haptic.play('reveal-pity'); el.classList.add('is-kept') }, at + 0.24)
+          tl.to(face, { rotateY: 0, duration: 0.5, ease: EASE.settle }, at + 0.28)
+        }
+      })
+      // Celebratory finale — a screen-wide sparkle, and the RARE banner if
+      // any rare landed in the batch.
+      tl.add(() => { particles.current?.revealStarfield(); if (anyRare) haptic.play('legendary-reveal') }, '>-0.2')
+      if (anyRare && banner) {
+        tl.fromTo(banner, { scale: 1.6, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: EASE.impact }, '<')
+        tl.to(banner, { opacity: 0, duration: 0.5, ease: EASE.exit }, '+=0.8')
+      }
+      tl.to({}, { duration: 0.3 })
+      return () => { tl.kill() }
+    }
+
+    // ---- Single reveal — one card takes center stage ---------------------
     const tl = gsap.timeline({ onComplete: () => setSettled(true) })
     entries.forEach((entry, i) => {
       const el = cardRefs.current[i]
@@ -198,57 +373,23 @@ export default function MintCeremony({ requestIds, entries, particles, frameRef,
       const at = i === 0 ? '+=0.15' : '+=0.2'
       const grown = result?.status === 'minted' ? bigScale : () => Math.min(1.7, bigScale(el))
 
-      // Take the stage…
       tl.set(el, { zIndex: 60 }, at)
-      tl.to(el, {
-        x: () => toCenterX(el),
-        y: () => toCenterY(el),
-        scale: () => grown(el),
-        duration: 0.4,
-        ease: EASE.entranceSoft
-      })
+      tl.to(el, { x: () => toCenterX(el), y: () => toCenterY(el), scale: () => grown(el), duration: 0.4, ease: EASE.entranceSoft })
 
-      if (result?.status === 'minted') {
-        const rare = entry.preview.isRare
-        tl.to(face, {
-          rotateY: 90, duration: rare ? 0.5 : 0.35, ease: EASE.flipIn,
-          onStart: () => {
-            if (rare) {
-              const { x, y } = cardCenter(el)
-              particles.current?.legendaryFollowup(x, y)
-              haptic.play('legendary-flip')
-            }
-          }
-        })
-        tl.add(() => {
-          el.classList.add('is-minted')
-          const { x, y } = cardCenter(el)
-          if (rare) {
-            particles.current?.legendaryBurst(x, y)
-            haptic.play('legendary-reveal')
-          } else {
-            particles.current?.dustBurst(x, y)
-            haptic.play('reveal-burst')
-          }
-        })
-        tl.to(face, { rotateY: 0, duration: rare ? 0.6 : 0.45, ease: EASE.settleSpring })
-        // A beat to admire it at full size before it rejoins the fan.
-        tl.to(el, { x: 0, y: 0, scale: 1, duration: 0.45, ease: EASE.settleSoft }, '+=0.35')
+      if (result?.status === 'minted' && entry.preview.isRare) {
+        revealRare(el, face)
+      } else if (result?.status === 'minted') {
+        revealCommon(el, face, entry)
       } else {
-        // The failed mint: steps up, tries to turn, gives up, and returns
-        // still sealed — visibly unharmed. The parade rolls on (one
-        // failure never stalls the batch, on-chain or on-screen).
+        // The failed mint: steps up, tries to turn, gives up, returns sealed.
         tl.to(face, { rotateY: 55, duration: 0.3, ease: EASE.flipIn })
         tl.add(() => haptic.play('reveal-pity'))
         tl.to(face, { rotateY: 0, duration: 0.7, ease: EASE.settle })
         tl.add(() => el.classList.add('is-kept'))
-        tl.to(el, { x: 0, y: 0, scale: 1, duration: 0.4, ease: EASE.settleSoft }, '+=0.15')
       }
+      tl.to(el, { x: 0, y: 0, scale: 1, duration: 0.5, ease: EASE.settleSoft }, '+=0.5')
       tl.set(el, { clearProps: 'zIndex' })
     })
-    // A short beat before the summary lands; the summary block itself isn't
-    // in the DOM until `settled` renders it, so its entrance is CSS-driven
-    // (see .ceremony-summary in styles.css) rather than part of this timeline.
     tl.to({}, { duration: 0.35 })
     return () => { tl.kill() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,6 +414,7 @@ export default function MintCeremony({ requestIds, entries, particles, frameRef,
   return (
     <div className={`ceremony${reduce ? ' ceremony--reduced' : ''}`} ref={rootRef} role="dialog" aria-modal="true" aria-label="Minting">
       <div className="ceremony-scrim" aria-hidden="true" />
+      <div className="ceremony-rare-banner" aria-hidden="true">✦ RARE ✦</div>
       <div className="ceremony-stage">
         <div className={`ceremony-fan ceremony-fan--${Math.min(entries.length, 5)}`}>
           {entries.map((entry, i) => {

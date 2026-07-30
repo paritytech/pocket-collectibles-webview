@@ -25,6 +25,7 @@ import type {
   Ticket
 } from '../bridge/types'
 import { RARE_THRESHOLD } from '../collectibles/resolver'
+import { outcomeIndex } from '../collectibles/mintCollections'
 
 /** Any ticket whose hash ends with this suffix fails its mint — mock
  *  scenarios craft exactly one such ticket to exercise the failure path.
@@ -100,16 +101,16 @@ export function loadScenario(input: CollectionInput): void {
   }
 }
 
-/** Construct the hash of a PLAYER-CHOSEN item: rarity band in bytes 0–1
- *  (matching the ticket's tier), the chosen pool index in bytes 2–3, and
- *  the ticket's tail for uniqueness — so the minted hash resolves to
- *  exactly the item the player picked.
- *  PRODUCTION: no such derivation exists yet — player choice needs the
- *  claim call / selector to accept an item reference (new runtime work). */
-function chosenItemHash(ticketHash: string, itemIndex: number): string {
+/** Construct the minted item's hash for a ticket claimed into a collection:
+ *  the collection derives a pool index from the credit hash (outcomeIndex),
+ *  which we bake into bytes 0–3 so the item resolves to exactly what the
+ *  reveal previewed. Same ticket + collection → same item, forever.
+ *  PRODUCTION: the collection's minting contract does this on-chain. */
+function mintedItemHash(ticketHash: string, collectionId: string): string {
   const rare = parseInt(ticketHash.slice(0, 4), 16) < RARE_THRESHOLD
   const band = rare ? '0000' : '8000'
-  const pick = (itemIndex & 0xffff).toString(16).padStart(4, '0')
+  const idx = outcomeIndex(ticketHash, rare ? 'rare' : 'common', collectionId)
+  const pick = (idx & 0xffff).toString(16).padStart(4, '0')
   return band + pick + ticketHash.slice(8)
 }
 
@@ -134,12 +135,15 @@ function handleMint(req: Extract<BridgeRequest, { type: 'request.mint' }>): void
         reason: "That one didn't go through — your ticket is safe"
       }
     }
-    return { ticketHash: m.ticketHash, status: 'minted', itemId: chosenItemHash(m.ticketHash, m.itemIndex) }
+    return { ticketHash: m.ticketHash, status: 'minted', itemId: mintedItemHash(m.ticketHash, m.collectionId) }
   })
   const pending: RequestItemUpdate[] = mints.map((m) => ({ ticketHash: m.ticketHash, status: 'pending' }))
 
+  // Dev demo mints compress the pre-reveal stream so the reveal starts
+  // right away; real mints keep the full, honest pacing.
+  const k = req.demo ? 0.12 : 1
   const stage = (delay: number, update: Omit<RequestUpdate, 'requestId'>) => {
-    window.setTimeout(() => callDeliverRequestUpdate({ requestId, ...update }), delay)
+    window.setTimeout(() => callDeliverRequestUpdate({ requestId, ...update }), delay * k)
   }
 
   // PRODUCTION: the native bridge handler validates the request — every
@@ -220,7 +224,7 @@ function handleMint(req: Extract<BridgeRequest, { type: 'request.mint' }>): void
       tickets: keptTickets
     }
     callSetCollection(current)
-  }, 4400)
+  }, 4400 * k)
 }
 
 /** Mock recipients "from the address book" — PRODUCTION: the contact

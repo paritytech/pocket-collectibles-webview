@@ -1237,6 +1237,7 @@ button {
 }
 .ceremony-card {
   --shine: 0;
+  --charge: 0;
   position: relative;
   width: 118px;
   border-radius: 16px;
@@ -1421,6 +1422,92 @@ button {
   transform-origin: 50% 115%;
 }
 .deck-card .tile { width: 100%; }
+.deck-card { touch-action: pan-y; }
+
+/* Flip: front (the tile) and a decorative back share a 3D box. */
+.deck-flip {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.deck-flip.is-flipped { transform: rotateY(180deg); }
+.deck-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.deck-face--back {
+  position: absolute; inset: 0;
+  transform: rotateY(180deg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+  border-radius: 18px;
+  background:
+    radial-gradient(ellipse 60% 60% at 50% 42%, rgb(var(--glow, 120 134 255) / 0.28) 0%, transparent 68%),
+    radial-gradient(circle at 50% 48%, #15141d 0%, #0a0910 78%, #07060c 100%);
+  border: 1px solid rgb(var(--glow, 120 134 255) / 0.4);
+  overflow: hidden;
+}
+/* A faint guilloché-ish ring pattern on the back. */
+.deck-face--back::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-radial-gradient(circle at 50% 44%,
+    rgb(var(--glow, 120 134 255) / 0.10) 0 1px, transparent 1px 13px);
+  -webkit-mask: radial-gradient(circle at 50% 44%, #000 0%, transparent 72%);
+  mask: radial-gradient(circle at 50% 44%, #000 0%, transparent 72%);
+}
+.deck-face--back { padding: 22px 20px; justify-content: flex-start; gap: 8px; text-align: center; }
+.deck-back-mark {
+  font-size: 34px; line-height: 1;
+  margin-top: 6px;
+  color: rgb(var(--glow, 120 134 255) / 0.95);
+  text-shadow: 0 0 24px rgb(var(--glow, 120 134 255) / 0.6);
+}
+.deck-back-name {
+  font-family: var(--font-title);
+  font-weight: 800; font-size: 17px;
+  color: var(--ink-1);
+}
+.deck-back-rarity {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgb(var(--glow, 120 134 255) / 0.95);
+}
+.deck-back-facts {
+  margin: 10px 0 0; width: 100%;
+  display: flex; flex-direction: column; gap: 0;
+}
+.deck-back-facts > div {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 2px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.deck-back-facts dt { color: var(--ink-3); letter-spacing: 0.03em; }
+.deck-back-facts dd { margin: 0; color: var(--ink-1); font-weight: 500; }
+.deck-back-serial {
+  margin-top: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px; letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+.deck-flip-btn {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  font-size: 18px;
+  color: var(--ink-2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  transition: color 0.2s ease, transform 0.15s ease, background 0.2s ease;
+}
+.deck-flip-btn:active { transform: scale(0.9); }
+.deck-flip-btn[aria-pressed="true"] { color: #fff; background: rgba(81, 99, 245, 0.7); border-color: rgba(140, 152, 255, 0.7); }
+.deck-flip-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.deck-hint {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
 /* Only the top card wears its name plate — the stack behind reads as
    card backs, not a blur of overlapping text. */
 .deck-card:not([data-depth='0']) .tile-meta { visibility: hidden; }
@@ -1847,24 +1934,47 @@ button {
   gap: 12px;
   width: min(80%, 320px);
 }
-.pgflow-mint { width: 100%; padding: 13px; border-radius: 12px; text-align: center; }
-.pgflow-skip {
+.pgflow-actions { gap: 10px; }
+/* Primary — the batch hero. Gold, confident, a soft (not blaring) glow. */
+.pgflow-primary {
   width: 100%;
-  padding: 12px;
-  border-radius: 12px;
+  padding: 15px;
+  border-radius: 14px;
+  font-family: var(--font-title);
+  font-weight: 900; font-size: 15px;
+  letter-spacing: 0.01em;
+  color: #2a1c00;
+  background: linear-gradient(180deg, var(--gold-deep), var(--gold));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.pgflow-primary:active { transform: scale(0.97); }
+/* Secondary — quiet ghost, clearly subordinate to the hero. */
+.pgflow-secondary {
+  width: 100%;
+  padding: 13px;
+  border-radius: 14px;
   font-weight: 600; font-size: 14px;
   color: var(--ink-1);
-  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  transition: background 0.2s ease;
 }
-.pgflow-skip:focus-visible, .pgflow-exit:focus-visible {
-  outline: 2px solid var(--accent-bright); outline-offset: 2px;
+.pgflow-secondary:active { background: rgba(255, 255, 255, 0.1); }
+/* Tertiary — a row of subtle text links. */
+.pgflow-links {
+  display: flex; align-items: center; justify-content: center;
+  gap: 18px;
+  margin-top: 4px;
 }
-.pgflow-exit {
-  padding: 6px;
-  font-size: 12.5px;
+.pgflow-link {
+  padding: 6px 2px;
+  font-size: 13px;
   color: var(--ink-3);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+}
+.pgflow-link:hover { color: var(--ink-2); }
+.pgflow-primary:focus-visible, .pgflow-secondary:focus-visible, .pgflow-link:focus-visible {
+  outline: 2px solid var(--accent-bright); outline-offset: 2px;
 }
 
 
@@ -1896,3 +2006,120 @@ button {
   color: var(--accent-bright);
 }
 .picker-back:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+
+
+/* ---------- Rare reveal: the anticipation charge ----------
+   A rare charge blooms HOT GOLD (not the muted collection tint) so it's
+   unmistakable something special is coming; --charge (0→1, GSAP-driven)
+   drives edge-light, rays and the wordmark. */
+.ceremony-card--rare.is-charging .ceremony-card-inner {
+  box-shadow:
+    inset 0 0 calc(var(--charge) * 44px) rgb(255 236 176 / calc(var(--charge) * 0.75)),
+    0 0 calc(22px + var(--charge) * 150px) rgb(255 205 90 / calc(var(--charge) * 0.98));
+}
+.ceremony-card--rare.is-charging .ticket-burst {
+  opacity: calc(0.4 + var(--charge) * 0.6);
+  filter: hue-rotate(calc(var(--charge) * -40deg)) saturate(1.4);
+}
+.ceremony-card--rare.is-charging .ceremony-rays { opacity: calc(var(--charge) * 1); }
+.ceremony-card--rare.is-charging .ticket-mystery-word {
+  color: #ffe9a8;
+  text-shadow: 0 0 calc(8px + var(--charge) * 34px) rgb(255 205 90 / 0.95);
+}
+
+/* Spotlight: the whole world dims around a rare so the card is the only
+   thing lit. */
+.ceremony-scrim { transition: background 0.5s ease; }
+.ceremony--spotlight .ceremony-scrim {
+  background: radial-gradient(ellipse 60% 50% at 50% 42%, rgba(20, 12, 2, 0.55) 0%, rgba(2, 2, 6, 0.985) 60%);
+}
+
+/* The "RARE" banner that slams over the reveal. */
+.ceremony-rare-banner {
+  position: absolute; left: 0; right: 0; top: 6%;
+  z-index: 70;
+  text-align: center;
+  font-family: var(--font-title);
+  font-weight: 900;
+  font-size: clamp(28px, 9vw, 42px);
+  letter-spacing: 0.16em;
+  color: #ffdf8e;
+  text-shadow: 0 0 32px rgba(255, 205, 90, 0.85), 0 2px 4px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) { .ceremony-rare-banner { display: none; } }
+
+/* Dev reveal shortcut — rare button wears the gold so it's unmistakable. */
+.dev-panel-btn--rare.dev-panel-btn { color: var(--gold); border-color: rgba(255, 202, 40, 0.4); }
+
+
+/* ---------- Collection picker (~10 collections, favourites) ---------- */
+.collpick-grid {
+  max-height: 300px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.picker--inline .collpick-grid { max-height: none; flex: 1; min-height: 0; }
+.collpick-divider {
+  margin: 8px 2px 2px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.collpick-card {
+  position: relative;
+  display: flex; align-items: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.collpick-choose {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 13px;
+  padding: 12px 12px;
+  text-align: left;
+}
+.collpick-emblem {
+  flex: 0 0 46px;
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  font-size: 22px;
+  color: rgb(var(--glow, 134 146 255) / 0.95);
+  background:
+    radial-gradient(circle at 50% 45%, rgb(var(--glow, 134 146 255) / 0.35) 0%, transparent 70%),
+    radial-gradient(circle at 50% 48%, #15141d 0%, #0a0910 82%);
+  border: 1px solid rgb(var(--glow, 134 146 255) / 0.4);
+}
+.collpick-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.collpick-label { font-family: var(--font-title); font-weight: 800; font-size: 15.5px; color: var(--ink-1); }
+.collpick-blurb { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collpick-fav {
+  flex: 0 0 auto;
+  width: 48px; align-self: stretch;
+  font-size: 19px; line-height: 1;
+  color: var(--ink-3);
+  border-left: 1px solid var(--line);
+  transition: color 0.2s ease, transform 0.15s ease;
+}
+.collpick-fav.is-fav { color: var(--gold); }
+.collpick-fav:active { transform: scale(0.85); }
+.collpick-fav:focus-visible, .collpick-choose:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+
+/* Deck card back: open-detail action. */
+.deck-back-open {
+  margin-top: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 12.5px; font-weight: 700;
+  color: var(--ink-1);
+  background: rgb(var(--glow, 120 134 255) / 0.18);
+  border: 1px solid rgb(var(--glow, 120 134 255) / 0.45);
+  pointer-events: auto;
+}
+.deck-back-open:active { transform: scale(0.95); }
+.deck-back-open:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }

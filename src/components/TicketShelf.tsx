@@ -1,12 +1,15 @@
 import { useMemo } from 'react'
 import type { TicketEntry } from '../collectibles/tickets'
-import { EXPIRY_WARN_S } from '../collectibles/tickets'
+import { EXPIRY_WARN_S, isTicketExpired } from '../collectibles/tickets'
 import TicketCard from './TicketCard'
+import { haptic } from '../haptics/engine'
 
 interface TicketShelfProps {
   entries: TicketEntry[]
   /** Tap a mintable ticket → the item picker (choose-your-item). */
   onPick: (entry: TicketEntry) => void
+  /** Mint every mintable ticket at once ("surprise me"). */
+  onMintAll?: (tickets: TicketEntry[]) => void
 }
 
 /** The mint-first shelf: rarity-tier ticket vouchers in a horizontal rail.
@@ -16,7 +19,8 @@ interface TicketShelfProps {
  *  Note there is deliberately NO fee/price anywhere on this surface:
  *  minting is free to the user (PGAS-sponsored), and the PRD forbids even
  *  hinting at a gas cost. */
-export default function TicketShelf({ entries, onPick }: TicketShelfProps) {
+export default function TicketShelf({ entries, onPick, onMintAll }: TicketShelfProps) {
+  const mintable = useMemo(() => entries.filter((e) => e.state === 'mintable' && !isTicketExpired(e)), [entries])
   // Expiry never arrives unannounced (PRD success metric): surface the
   // soonest-expiring ticket as a banner as soon as it crosses the warn
   // threshold. PRODUCTION: native mirrors the same expiresAt data with a
@@ -43,7 +47,17 @@ export default function TicketShelf({ entries, onPick }: TicketShelfProps) {
           <span aria-hidden="true">◇ </span>
           {entries.length === 1 ? '1 ticket' : `${entries.length} tickets`}
         </h2>
-        <span className="ticket-shelf-hint">Tap one to mint</span>
+        {onMintAll && mintable.length > 1 ? (
+          <button
+            type="button"
+            className="mint-all-btn"
+            onClick={() => { haptic.initFromGesture(); haptic.play('collect-all-appear'); onMintAll(mintable) }}
+          >
+            Mint all ({mintable.length})
+          </button>
+        ) : (
+          <span className="ticket-shelf-hint">Tap one to mint</span>
+        )}
       </div>
       {soonest && (
         <p className="ticket-banner" role="status">

@@ -4,6 +4,7 @@
 
 import type { CollectionInput, OwnedNft, Ticket } from './bridge/types'
 import { MOCK_FAIL_SUFFIX } from './mock/mockNative'
+import { RARE_THRESHOLD, poolSize, type Rarity } from './collectibles/resolver'
 
 /** A realistic native-shape NFT hash: 64 lowercase hex chars (32 bytes).
  *  The resolver consumes the first 4 bytes for rarity + image pick, so a
@@ -210,6 +211,24 @@ export function composeScenario(
     }
   }
   return { displayName: MOCK_NAME, owned, tickets: TICKET_SETS[ticketsId].build() }
+}
+
+/** Dev shortcut: a synthetic mintable ticket + item index guaranteed to
+ *  mint an item of the given rarity — lets the panel jump straight to the
+ *  reveal ceremony to compare the rare vs common experience. The rarity
+ *  band in bytes 0–1 steers the mock's chosenItemHash into the right pool;
+ *  the tail is kept clear of the fail suffix. */
+export function demoMintTicket(rarity: Rarity): { ticketHash: string; itemIndex: number } {
+  const itemIndex = Math.floor(Math.random() * Math.max(1, poolSize(rarity)))
+  const roll = rarity === 'rare' ? 1 : RARE_THRESHOLD + 100
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  bytes[0] = (roll >> 8) & 0xff
+  bytes[1] = roll & 0xff
+  if (bytes[30] === 0x00 && bytes[31] === 0xff) bytes[31] = 0xfe // never the fail suffix
+  let h = '0x'
+  for (const b of bytes) h += b.toString(16).padStart(2, '0')
+  return { ticketHash: h, itemIndex }
 }
 
 export interface DevMock {

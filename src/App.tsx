@@ -6,7 +6,7 @@ import DetailScreen from './screens/DetailScreen'
 import IntroOverlay from './components/IntroOverlay'
 import ChestArrival from './components/ChestArrival'
 import DevPanel from './components/DevPanel'
-import ItemPicker from './components/ItemPicker'
+import CollectionPicker from './components/CollectionPicker'
 import MintCeremony, { type CeremonyEntry } from './components/MintCeremony'
 import PostGameFlow from './components/PostGameFlow'
 import RecipientPicker from './components/RecipientPicker'
@@ -25,17 +25,25 @@ import { newRequestId, sendBridgeRequest } from './bridge/requests'
 import type { CollectionInput, OwnedNft, Ticket } from './bridge/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
 import { buildTicketEntries, isTicketExpired, type TicketEntry } from './collectibles/tickets'
-import type { CatalogItem } from './collectibles/mintCollections'
 import { loadScenario } from './mock/mockNative'
 import {
   COLLECTION_SIZES,
   DEV_MOCKS,
   TICKET_SETS,
   composeScenario,
+  demoMintTicket,
   type CollectionSizeId,
   type FlavorId,
   type TicketSetId
 } from './devMocks'
+import { type Rarity } from './collectibles/resolver'
+import { shortCode } from './collectibles/format'
+import {
+  defaultTarget,
+  loadFavourites,
+  outcomeFor,
+  saveFavourites
+} from './collectibles/mintCollections'
 
 /** Parse the composed-scenario axis params (?tickets=&collection=&flavors=)
  *  the dev panel mirrors into the URL. Null when none are present. */
@@ -88,6 +96,11 @@ interface CeremonyState {
   /** Snapshot of ticket + chosen item — immune to the collection
    *  replacement that lands underneath mid-ceremony. */
   entries: CeremonyEntry[]
+  /** What to do when the ceremony finishes, if it ran inside the guided
+   *  post-game flow: 'advance' → back to the flow for the next ticket;
+   *  'exit' → the flow is done, land on the collection. Absent = a
+   *  standalone mint (just close). */
+  after?: 'advance' | 'exit'
 }
 
 export default function App() {
@@ -104,6 +117,12 @@ export default function App() {
   // one (mint or skip). A snapshot queue — skipped/minted tickets stay
   // consistent even as deliveries change the live shelf underneath.
   const [guided, setGuided] = useState<{ queue: TicketEntry[]; index: number } | null>(null)
+  // Dev: 'random' surprises every reveal; 'signature' gives each collection
+  // a consistent look (rares always override with the epic charge).
+  const [variantMode, setVariantMode] = useState<'signature' | 'random'>('signature')
+  // Favourite collections (persisted). The top favourite is the one-click
+  // "Mint all" default target.
+  const [favourites, setFavourites] = useState<string[]>(() => loadFavourites())
   const [ceremony, setCeremony] = useState<CeremonyState | null>(null)
   // The game→collectibles handoff (?arrival=1): a sealed bundle covers the
   // screen until tapped; opening it replays the gallery entrance so the
@@ -330,24 +349,42 @@ export default function App() {
     setArrivalGen((n) => n + 1)
   }
 
-  function mintChosen(ticket: TicketEntry, collectionId: string, item: CatalogItem): void {
+  /** The one-click default mint target: the top favourite, else the
+   *  governance default collection. */
+  const mintTarget = defaultTarget(favourites)
+
+  function toggleFavourite(id: string): void {
+    setFavourites((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev]
+      saveFavourites(next)
+      return next
+    })
+  }
+
+  /** Fire a batch mint: every ticket claims into `collectionId`, one
+   *  request, one batch ceremony (the wave). Each ticket's item is derived
+   *  deterministically from its credit hash + the collection. `after`
+   *  coordinates with the guided post-game flow. */
+  function mintInto(tickets: TicketEntry[], collectionId: string, after?: 'advance' | 'exit'): void {
     if (ceremony) return
+    const mintable = tickets.filter((t) => t.state === 'mintable')
+    if (mintable.length === 0) return
+    const mints = mintable.map((t) => ({ ticketHash: t.hashHex, collectionId }))
+    const snapshot: CeremonyEntry[] = mintable.map((t) => ({
+      hash: t.hash, shortCode: t.shortCode, collectionId,
+      preview: outcomeFor(t.hash, t.rarity, collectionId)
+    }))
     const requestId = newRequestId()
-    sendBridgeRequest({
-      type: 'request.mint',
-      requestId,
-      mints: [{ ticketHash: ticket.hashHex, collectionId, itemIndex: item.index }]
-    })
+    sendBridgeRequest({ type: 'request.mint', requestId, mints })
     setPicking(null)
-    setCeremony({
-      requestIds: [requestId],
-      entries: [{
-        hash: ticket.hash,
-        shortCode: ticket.shortCode,
-        collectionId,
-        preview: item.resolved
-      }]
-    })
+    setArrival(false)
+    setCeremony({ requestIds: [requestId], entries: snapshot, ...(after ? { after } : {}) })
+  }
+
+  /** One-click "Mint all" — the primary path. Everything into the default
+   *  target collection at once. From the post-game flow it ends the flow. */
+  function mintAll(tickets: TicketEntry[]): void {
+    mintInto(tickets, mintTarget, guided ? 'exit' : undefined)
   }
 
   /** Send: the recipient sheet resolves WHO (recent contact or username
@@ -372,6 +409,25 @@ export default function App() {
   function openGame(entry: CollectibleEntry): void {
     if (!entry.gameLink) return
     sendBridgeRequest({ type: 'request.open_game', requestId: newRequestId(), url: entry.gameLink.url })
+  }
+
+  /** Dev shortcut: jump straight to the reveal ceremony with a guaranteed
+   *  rare or common outcome, to compare the two experiences instantly. */
+  function demoMint(rarity: Rarity): void {
+    if (ceremony) return
+    const { ticketHash } = demoMintTicket(rarity)
+    const hash = (ticketHash.startsWith('0x') ? ticketHash.slice(2) : ticketHash).toLowerCase()
+    const collectionId = mintTarget
+    const preview = outcomeFor(hash, rarity, collectionId)
+    const requestId = newRequestId()
+    sendBridgeRequest({ type: 'request.mint', requestId, mints: [{ ticketHash, collectionId }], demo: true })
+    setPicking(null)
+    setArrival(false)
+    setGuided(null)
+    setCeremony({
+      requestIds: [requestId],
+      entries: [{ hash, shortCode: shortCode(hash), collectionId, preview }]
+    })
   }
 
   // Dev helper: load a composed scenario through the mock native (mirrors
@@ -421,6 +477,7 @@ export default function App() {
             entries={entries}
             tickets={ticketEntries}
             onPickTicket={setPicking}
+            onMintAll={mintAll}
             {...(displayName ? { displayName } : {})}
             onOpen={handleOpen}
           />
@@ -459,9 +516,11 @@ export default function App() {
         )}
 
         {picking && (
-          <ItemPicker
+          <CollectionPicker
             entry={picking}
-            onMint={(collectionId, item) => mintChosen(picking, collectionId, item)}
+            favourites={favourites}
+            onToggleFavourite={toggleFavourite}
+            onChoose={(collectionId) => mintInto([picking], collectionId, guided ? 'advance' : undefined)}
             onClose={() => setPicking(null)}
             // Inline (full-screen flow step) when reached from the guided
             // post-game flow; a modal sheet when opened from the shelf.
@@ -480,11 +539,15 @@ export default function App() {
             entries={ceremony.entries}
             particles={particleRef}
             frameRef={frameRef}
+            variantMode={variantMode}
             onDone={() => {
+              const after = ceremony.after
               setCeremony(null)
-              // In the guided post-game flow, a finished mint moves on to
-              // the next ticket automatically.
-              if (guided) advanceGuided()
+              // In the guided post-game flow: a single mint returns to the
+              // flow for the next ticket ('advance'); Mint-all ends it
+              // ('exit'). A standalone mint just closes to the collection.
+              if (after === 'advance') advanceGuided()
+              else if (after === 'exit') exitGuided()
             }}
           />
         )}
@@ -514,6 +577,7 @@ export default function App() {
             onMint={setPicking}
             onSkip={advanceGuided}
             onExit={exitGuided}
+            onMintAll={() => mintAll(guided.queue)}
           />
         )}
 
@@ -529,6 +593,9 @@ export default function App() {
           onScenario={loadDevScenario}
           onChest={() => setArrival(true)}
           onIntro={() => setShowIntro(true)}
+          onDemoMint={demoMint}
+          alwaysDifferent={variantMode === 'random'}
+          onToggleAlwaysDifferent={() => setVariantMode((m) => (m === 'random' ? 'signature' : 'random'))}
           {...(readAxisParams() ? { initial: readAxisParams()! } : {})}
         />
       )}

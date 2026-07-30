@@ -9,6 +9,7 @@ import {
   type FlavorId,
   type TicketSetId
 } from '../devMocks'
+import type { Rarity } from '../collectibles/resolver'
 
 interface DevPanelProps {
   /** Load a composed scenario (routes through the mock native). */
@@ -16,6 +17,12 @@ interface DevPanelProps {
   /** One-shot moments. */
   onChest: () => void
   onIntro: () => void
+  /** Jump straight to the reveal ceremony with a forced outcome. */
+  onDemoMint: (rarity: Rarity) => void
+  /** Reveal variety: true = a random animation each mint; false =
+   *  signature-per-collection. */
+  alwaysDifferent: boolean
+  onToggleAlwaysDifferent: () => void
   /** Initial axis state, usually parsed from the URL by App. */
   initial?: { tickets?: TicketSetId; collection?: CollectionSizeId; flavors?: FlavorId[] }
 }
@@ -25,7 +32,7 @@ interface DevPanelProps {
  *  one-shot moments. Every change reloads the composed state and mirrors
  *  it into the URL (?tickets=&collection=&flavors=) so states are
  *  shareable, like themes. */
-export default function DevPanel({ onScenario, onChest, onIntro, initial }: DevPanelProps) {
+export default function DevPanel({ onScenario, onChest, onIntro, onDemoMint, alwaysDifferent, onToggleAlwaysDifferent, initial }: DevPanelProps) {
   const [ticketsId, setTicketsId] = useState<TicketSetId>(initial?.tickets ?? 'fresh')
   const [sizeId, setSizeId] = useState<CollectionSizeId>(initial?.collection ?? 'typical')
   const [flavors, setFlavors] = useState<ReadonlySet<FlavorId>>(new Set(initial?.flavors ?? []))
@@ -98,6 +105,24 @@ export default function DevPanel({ onScenario, onChest, onIntro, initial }: DevP
             {FLAVORS[id].label}
           </button>
         ))}
+      </div>
+      <div className="dev-group">
+        <span className="dev-group-label">reveal</span>
+        <button type="button" className="dev-panel-btn dev-panel-btn--rare" onClick={() => onDemoMint('rare')} title="Jump to the reveal with a guaranteed rare">
+          ✦ mint rare
+        </button>
+        <button type="button" className="dev-panel-btn" onClick={() => onDemoMint('common')} title="Jump to the reveal with a common, for comparison">
+          mint common
+        </button>
+        <button
+          type="button"
+          className={`dev-panel-btn${alwaysDifferent ? ' is-active' : ''}`}
+          aria-pressed={alwaysDifferent}
+          onClick={onToggleAlwaysDifferent}
+          title="Random reveal animation each mint (vs signature-per-collection)"
+        >
+          always different
+        </button>
       </div>
       <div className="dev-group">
         <span className="dev-group-label">moments</span>

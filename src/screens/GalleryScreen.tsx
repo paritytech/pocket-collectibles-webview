@@ -19,6 +19,8 @@ interface GalleryScreenProps {
   tickets?: TicketEntry[]
   /** Tap a mintable ticket → the choose-your-item picker. */
   onPickTicket?: (ticket: TicketEntry) => void
+  /** Mint every mintable ticket at once ("surprise me"). */
+  onMintAll?: (tickets: TicketEntry[]) => void
   /** Open the detail view. Passes the current sorted list + the tapped
    *  item's index so detail can swipe between items in display order, plus
    *  the on-screen art rect for the shared-element zoom. */
@@ -30,7 +32,7 @@ const SORT_MODES: SortMode[] = ['recent', 'rarity', 'name', 'collection']
 type ViewMode = 'grid' | 'deck'
 const VIEW_LABELS: Record<ViewMode, string> = { grid: 'Grid', deck: 'Deck' }
 
-export default function GalleryScreen({ entries, displayName, tickets, onPickTicket, onOpen }: GalleryScreenProps) {
+export default function GalleryScreen({ entries, displayName, tickets, onPickTicket, onMintAll, onOpen }: GalleryScreenProps) {
   const [sort, setSort] = useState<SortMode>('recent')
   // Default to Deck wherever it's offered (arcana) — the card metaphor is
   // the point there; effectiveView forces grid in themes without a deck.
@@ -229,7 +231,7 @@ export default function GalleryScreen({ entries, displayName, tickets, onPickTic
 
       <div className="gallery-scroll">
         {hasTickets && (
-          <TicketShelf entries={tickets!} onPick={onPickTicket!} />
+          <TicketShelf entries={tickets!} onPick={onPickTicket!} {...(onMintAll ? { onMintAll } : {})} />
         )}
         {entries.length === 0 && hasTickets && (
           <div className="collection-empty">
