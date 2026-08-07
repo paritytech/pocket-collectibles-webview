@@ -98,6 +98,15 @@ function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
   const mintedAt = coerceMintedAt(obj.mintedAt)
   if (mintedAt !== undefined) item.mintedAt = mintedAt
   if (truthyFlag(obj.pending)) item.pending = true
+  // On-chain display metadata from the chain-read path. Same sanitation
+  // as displayName; the image URL must be http(s) (never javascript: etc).
+  if (typeof obj.name === 'string') {
+    const name = sanitizeDisplayName(obj.name)
+    if (name) item.name = name
+  }
+  if (typeof obj.imageUrl === 'string' && /^https?:\/\//i.test(obj.imageUrl.trim())) {
+    item.imageUrl = obj.imageUrl.trim()
+  }
   return { key, item }
 }
 
@@ -168,14 +177,20 @@ function sanitizeDisplayName(v: string): string | undefined {
   return Array.from(cleaned).slice(0, 24).join('') || undefined
 }
 
-// ---- Globals registered at module load ----------------------------------
-
-;(window as unknown as Record<string, unknown>).setCollection = (input: CollectionInput) => {
+/** Wholesale collection delivery — the single ingest point shared by
+ *  native's window.setCollection and the chain sync (src/chain/start.ts).
+ *  Bumps the generation only when the item SET changed, so a same-content
+ *  refresh (e.g. a chain re-poll) never remounts the gallery. */
+export function deliverCollection(input: CollectionInput): void {
   if (!ingestCollection(input)) return
   const sig = signatureOf()
   if (sig !== lastSignature) { lastSignature = sig; generation++ }
   scheduleNotify()
 }
+
+// ---- Globals registered at module load ----------------------------------
+
+;(window as unknown as Record<string, unknown>).setCollection = deliverCollection
 
 ;(window as unknown as Record<string, unknown>).pushNft = (raw: unknown) => {
   const coerced = coerceItem(raw)

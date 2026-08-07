@@ -44,6 +44,12 @@ export interface OwnedNft {
    *  not yet finalised into `Nfts`. Renders in a dimmed "pending" state
    *  with no mint date. Defaults to false (a confirmed mint). */
   pending?: boolean
+  /** On-chain display name (three-level metadata key `name`), when the
+   *  chain-read path resolved one. Overrides the catalogue-derived name. */
+  name?: string
+  /** Resolved artwork URL (from the metadata key `image`, served via the
+   *  IPFS gateway). Overrides the catalogue-derived art. */
+  imageUrl?: string
 }
 
 export interface CollectionInput {

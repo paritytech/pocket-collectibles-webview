@@ -13,6 +13,8 @@ import {
   getDroppedCount
 } from './bridge/collection'
 import { sendFlowEvent } from './bridge/send'
+import { isEmbedded } from './bridge/embed'
+import { stopChainSync } from './chain/start'
 import type { CollectionInput, OwnedNft } from './bridge/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
 import { DEV_MOCKS } from './devMocks'
@@ -27,15 +29,6 @@ const BOOT_TIMEOUT_MS = 8_000
 // Dev panel shows only with ?dev=1. Mirrors the game-results convention.
 const isDevMode =
   typeof window !== 'undefined' && /[?&]dev=1\b/.test(window.location.search)
-
-// "Embedded" = running inside a native WebView host (not a desktop preview).
-// CSS flattens the phone-frame mockup when body.is-embedded is set.
-const isEmbedded =
-  typeof window !== 'undefined' && (
-    !!(window as unknown as { collectibles?: unknown }).collectibles ||
-    !!window.webkit?.messageHandlers?.collectibles ||
-    /[?&]embed=1\b/.test(window.location.search)
-  )
 
 interface Selection {
   list: CollectibleEntry[]
@@ -234,6 +227,9 @@ export default function App() {
   // no resetCollection() is needed here — and calling it would be wrong, as
   // it clears the listener set (including this component's own subscription).
   function loadMock(build: () => CollectionInput): void {
+    // Chain sync would clobber the mock on its next poll — stop it for the
+    // rest of the session (a ?mock= boot never starts it in the first place).
+    stopChainSync()
     setSelection(null)
     const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
     w.setCollection?.(build())
