@@ -282,6 +282,50 @@ function uint16At(hex: string, byteOffset: number): number {
   return ((hi & 0xff) << 8) | (lo & 0xff)
 }
 
+/** Neutral placeholder shown when an item has no on-chain artwork yet:
+ *  a soft gradient tile with a question mark, as a data URI. */
+const PLACEHOLDER_ART =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+      '<rect width="512" height="512" rx="64" fill="#2e2b3d"/>' +
+      '<circle cx="256" cy="256" r="120" fill="#3d3952"/>' +
+      '<text x="256" y="300" font-size="140" text-anchor="middle" fill="#8a84a8" font-family="system-ui">?</text>' +
+      '</svg>'
+  )
+
+/** Build a ResolvedCollectible from ON-CHAIN data only — no catalogue
+ *  lookup. Name and artwork come from chain metadata (fallbacks: a serial
+ *  code and a neutral placeholder); rarity and glow stay derived from the
+ *  hash bytes (byte math, not the catalogue). */
+export function chainCollectible(
+  hashHex: string,
+  name: string | undefined,
+  url: string | undefined
+): ResolvedCollectible {
+  const cleaned = (hashHex || '').trim()
+  const hex = (cleaned.startsWith('0x') || cleaned.startsWith('0X') ? cleaned.slice(2) : cleaned).toLowerCase()
+  const valid = /^[0-9a-f]{64}$/.test(hex)
+  const rarity: Rarity = valid && uint16At(hex, 0) < RARE_THRESHOLD ? 'rare' : 'common'
+  // Deterministic glow from hash bytes 4-6, lifted into a soft range so
+  // dark hashes still halo visibly.
+  const glow = valid
+    ? [4, 5, 6].map((i) => 90 + (parseInt(hex.slice(i * 2, i * 2 + 2), 16) % 128)).join(' ')
+    : '138 132 168'
+  const code = valid ? `${hex.slice(0, 4)}·${hex.slice(-4)}`.toUpperCase() : 'UNKNOWN'
+  return {
+    url: url ?? PLACEHOLDER_ART,
+    filename: '',
+    name: name ?? `Collectible ${code}`,
+    collection: '',
+    collectionIndex: 0,
+    collectionSize: 0,
+    rarity,
+    isRare: rarity === 'rare',
+    glow
+  }
+}
+
 /** Resolve a 32-byte NFT hash to a catalogue image.
  *
  *  Accepts hex with or without a leading "0x", case-insensitive. On

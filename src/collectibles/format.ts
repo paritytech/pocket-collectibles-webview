@@ -2,7 +2,7 @@
 // renders, plus hash/date formatting and sorting.
 
 import type { OwnedNft } from '../bridge/types'
-import { resolveCollectible, type ResolvedCollectible } from './resolver'
+import { chainCollectible, type ResolvedCollectible } from './resolver'
 
 /** A fully-resolved collectible ready for the UI. Each owned hash is unique,
  *  but distinct hashes often resolve to the SAME art — the gallery collapses
@@ -78,16 +78,20 @@ export function formatRelative(mintedAt: number | undefined, now: number = Date.
   return `${Math.floor(day / 365)}y ago`
 }
 
-/** Resolve one OwnedNft into a CollectibleEntry. */
+/** Resolve one OwnedNft into a CollectibleEntry — from ON-CHAIN data
+ *  only. Name and artwork come from chain metadata; an item without them
+ *  shows a serial-code name and a placeholder tile. The old baked
+ *  catalogue (cid_map) is no longer consulted. */
 export function buildEntry(nft: OwnedNft): CollectibleEntry {
   const hash = strip0x(nft.hash).toLowerCase()
   const hashHex = `0x${hash}`
+  const resolved = chainCollectible(nft.hash, nft.name, nft.imageUrl)
   const entry: CollectibleEntry = {
     hash,
     hashHex,
     shortCode: shortCode(hash),
     pending: nft.pending === true,
-    resolved: resolveCollectible(nft.hash)
+    resolved
   }
   if (typeof nft.mintedAt === 'number') entry.mintedAt = nft.mintedAt
   return entry
