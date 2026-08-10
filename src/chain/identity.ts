@@ -1,25 +1,50 @@
-// Who the player is, for the credit map.
-//
-// `Game.NftClaimCredits` is keyed by the pallet's `AccountOrPerson`: an
-// ordinary account, or an alias (32-byte person id) for players known
-// through proof-of-personhood. WHICH identity this player queries as, and
-// where it comes from in production, is an open platform question
-// (DEPENDENCIES.md #2/#3) — this module isolates it the same way
-// accounts.ts isolates the purse-address convention.
-//
-// Resolution order at load:
-//   1. ?player=<ss58>   or   ?alias=<0x + 64 hex>   — dev/QA; persisted
-//   2. window.__PLAYER__ = { account } | { alias } set before our JS ran
-//   3. the identity persisted by a previous session
-// At any later point native may call window.setPlayerIdentity({...})
-// (buffer-or-deliver: registered at module load). Pass null to clear.
+/* Who the player is, for the credit map.
+ *
+ * This module is the permanent home of an OPEN QUESTION, DEPENDENCY #2/#3
+ * (DEPENDENCIES.md): which identity the player queries (and claims) as —
+ * game-subtree account or person alias — and where production learns it.
+ * The module's PARTS age differently; each temporary piece is marked
+ * inline:
+ *
+ *   PERMANENT — the PlayerIdentity type (mirrors the pallet's
+ *   `AccountOrPerson`, chain reality), the validation gate, and the
+ *   IdentitySource subscription every consumer reads through.
+ *   MISSING   — the authoritative resolution ("call host capability X" /
+ *   "derive it as Y"): that is what dependency #2/#3 will supply, as one
+ *   new branch in takeInitial().
+ *   TEMPORARY — everything currently feeding the seam (see markers).
+ *
+ * The credit map is keyed by the pallet's `AccountOrPerson`: an
+ * ordinary account, or an alias (32-byte person id) for players known
+ * through proof-of-personhood. This module isolates it the same way
+ * accounts.ts isolates the purse-address convention.
+ *
+ * Resolution order at load:
+ *   1. ?player=<ss58 | dev name (bob, …)>   or   ?alias=<0x + 64 hex>
+ *      — dev/QA; persisted
+ *   2. window.__PLAYER__ = { account } | { alias } set before our JS ran
+ *   3. the identity persisted by a previous session
+ * At any later point native may call window.setPlayerIdentity({...})
+ * (buffer-or-deliver: registered at module load). Pass null to clear.
+*/
 
 import { getSs58AddressInfo } from 'polkadot-api'
+import { isEmbedded } from '../bridge/embed'
+import { devAddressOf } from './derive'
 
 export type PlayerIdentity =
   | { kind: 'account'; address: string }
   | { kind: 'alias'; alias: string } // 0x-prefixed 32-byte hex
 
+/*
+* TEMPORARY SOLUTION TO OPEN QUESTION
+* DEPENDENCY #2/#3
+* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
+*
+* Dev-session persistence, so a reload keeps showing the same shelf.
+* Production resolves identity from its real source every boot instead.
+*
+*/
 const STORAGE_KEY = 'pkt_dev_player_v1'
 
 let identity: PlayerIdentity | null = null
@@ -29,11 +54,13 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   if (typeof o.account === 'string') {
-    const address = o.account.trim()
+    // Dev names (bob, alice, …) expand to their DEV_PHRASE addresses —
+    // a dev affordance, never inside a host, real addresses pass through.
+    const address = (!isEmbedded && devAddressOf(o.account)) || o.account.trim()
     let valid = false
     try { valid = getSs58AddressInfo(address).isValid } catch { /* not SS58 */ }
     if (valid) return { kind: 'account', address }
-    console.warn('[chain] dropping invalid player account', address)
+    console.warn('[chain] dropping invalid player account (need SS58 or a dev name)', address)
     return null
   }
   if (typeof o.alias === 'string') {
@@ -76,12 +103,26 @@ function set(raw: unknown, opts: { persist: boolean }): void {
 
 // ---- Globals registered at module load ----------------------------------
 
+// May graduate to permanent: a native-pushed identity is a plausible
+// production answer to dependency #2/#3, in which case this entry point
+// stays and only the dev inputs below go.
 ;(window as unknown as Record<string, unknown>).setPlayerIdentity = (raw: unknown) => {
   set(raw, { persist: false })
 }
 
 ;(function takeInitial(): void {
   try {
+    /*
+    * TEMPORARY SOLUTION TO OPEN QUESTION
+    * DEPENDENCY #2/#3
+    * https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
+    *
+    * Every branch below injects an identity from outside because the module cannot
+    * yet resolve one itself. The authoritative branch ("ask host capability X" /
+    * "derive as Y") lands here when the platform answers; the URL params and
+    * __PLAYER__ then demote to dev-only.
+    *
+    */
     const params = new URLSearchParams(window.location.search)
     const player = params.get('player')
     if (player) {
