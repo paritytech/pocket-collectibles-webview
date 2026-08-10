@@ -11,11 +11,11 @@ flowchart TD
     boot["main.tsx<br/>startChainSync()"] --> mock{"?mock= in URL?"}
     mock -- yes --> inert1["inert — mocks drive the store<br/>via window.setCollection"]
     mock -- no --> host{"host chain bridge?<br/>(collectiblesChain)"}
-    host -- yes --> hp["provider.ts: hostProvider<br/>JSON-RPC over postMessage /<br/>onChainRpcMessage(chain, json),<br/>multiplexed by chain id"]
+    host -- yes --> hp["connection.ts: hostProvider<br/>JSON-RPC over postMessage /<br/>onChainRpcMessage(chain, json),<br/>multiplexed by chain id"]
     host -- no --> emb{"embedded in a<br/>native WebView?"}
     emb -- yes --> inert2["inert — legacy push path only<br/>(native setCollection / pushNft)"]
-    emb -- no --> ws["provider.ts: dev fallback<br/>direct WebSockets to gamingnet<br/>asset-hub + people"]
-    hp --> clients["client.ts: one lazy polkadot-api<br/>client per chain (unsafe API)"]
+    emb -- no --> ws["connection.ts: dev fallback<br/>direct WebSockets to gamingnet<br/>asset-hub + people"]
+    hp --> clients["client.ts: one lazy polkadot-api<br/>client per chain (typed api over<br/>.papi descriptors; papi update in prebuild)"]
     ws --> clients
     clients --> loop["poll loop (§2)"]
 
@@ -34,8 +34,8 @@ dependencies #2/#3). Both are subscriptions — a change restarts the poll.
 ```mermaid
 sequenceDiagram
     participant ST as chain/start.ts
-    participant SC as chain/scarcity.ts
-    participant CR as chain/credits.ts
+    participant SC as chain/pallets/scarcity.ts
+    participant CR as chain/pallets/credits.ts
     participant AH as Asset Hub
     participant PC as People Chain
     participant CO as bridge/collection.ts
@@ -52,16 +52,18 @@ sequenceDiagram
         SC-->>ST: OwnedNft[] = { hash, mintedAt }
     and earned credits (People Chain, optional)
         ST->>CR: fetchCredits(identity)
-        CR->>PC: Game.NftClaimCreditBlocks(AccountOrPerson)<br/>+ api: nft_claim_credit_roots(claimant)
+        CR->>PC: NftCredits.NftClaimCreditBlocks(AccountOrPerson)<br/>+ api: NftCreditsApi.nft_claim_credit_roots(claimant)
         PC-->>CR: my award blocks | [(block, { root, timestamp, … })]
         CR->>PC: rooted blocks: api nft_claim_credit_proofs(block, claimant)
-        PC-->>CR: proofs carrying each credit hash<br/>(cached for the Phase-2 claim flow)
-        CR->>PC: rootless newest block: Game.NftClaimCreditAwards(block)
+        PC-->>CR: proofs carrying each credit hash and leaf<br/>(cached for the Phase-2 claim flow)
+        CR->>PC: rootless newest block: NftCredits.NftClaimCreditAwards(block)
         PC-->>CR: the block's award buffer, filtered to this claimant
-        CR-->>ST: Credit[] = { hash, awardedAt?, awardBlock?, root? }
+        CR-->>ST: Credit[] = { hash, awardedAt?, awardBlock?, root?, leaf? }
     end
 
-    Note over ST: mergeShelf():<br/>minted hash wins over same-hash credit;<br/>unminted credits → pending (wrapped/Earned).<br/>Claimable split plugs in here once roots sync to Asset Hub.
+    Note over ST: fetchClaimStates() (chain/pallets/claims.ts, Asset Hub):<br/>NftClaims.CreditTrees(block) — root arrived?<br/>NftClaims.ClaimedCredits(block) — leaf claimed?
+
+    Note over ST: mergeShelf():<br/>minted hash wins over same-hash credit;<br/>root not on Asset Hub → pending (wrapped/Earned);<br/>root there, leaf unclaimed → pending + claimable;<br/>leaf claimed elsewhere → withheld from the shelf.
 
     ST->>CO: deliverCollection({ owned })
     Note over CO: same store the native push bridge feeds:<br/>coerce → dedup by hash → generation bump<br/>only if the item SET changed
@@ -74,10 +76,11 @@ sequenceDiagram
 
 | Module | Owns |
 |---|---|
-| `chain/provider.ts` | where bytes come from: host bridge vs dev WS vs inert; chain multiplexing |
-| `chain/client.ts` | one lazy polkadot-api client per chain |
-| `chain/scarcity.ts` | Asset Hub reads: `NftsByOwner`, three-level `"hash"` metadata (vendored from the scarcity-tools SDK) |
-| `chain/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer (proof cache for Phase 2) |
+| `chain/connection.ts` | where bytes come from: host bridge vs dev WS vs inert; chain multiplexing |
+| `chain/client.ts` | one lazy polkadot-api client per chain; typed apis over generated descriptors (`.papi/whitelist.ts` bounds the generated package) |
+| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, three-level `"hash"` metadata (vendored from the scarcity-tools SDK) |
+| `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer (proof cache for Phase 2) |
+| `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/accounts.ts` | the purse-address seam (explicit sources win over the deriver) |
 | `chain/derive.ts` | the account deriver: `//product//scarcity//nft//i` (interim convention, decided 2026-08-07, not platform-ratified) over a `KeyAtIndex` capability — dev impl derives from `DEV_PHRASE` in-page; production waits on the host's public-key-at-index API |
 | `chain/identity.ts` | the player-identity seam |
@@ -86,9 +89,6 @@ sequenceDiagram
 
 ## Not implemented yet (marked seams)
 
-- **Claimable state** — needs credit roots ON Asset Hub
-  (individuality `feat/1253-tn-sync-merkle-roots-asset-hub`); the split
-  point is `mergeShelf()` in `start.ts`.
 - **The purse convention is interim** (dependency #5) — `derive.ts`
   implements `//product//scarcity//nft//i` as our own decision pending
   platform ratification; only `pursePath()` changes if the rule changes.
@@ -97,5 +97,7 @@ sequenceDiagram
 - **Credit-hash == item-hash assumption** — merging assumes a minted
   item's `"hash"` metadata equals the credit hash.
 - **Claiming/minting** (Phase 2) — proofs are already fetched and cached
-  (`getCachedProof()` in `credits.ts`); the claim extrinsic and signing
-  wait on `pallet-scarcity-claims` on Asset Hub and the signing seam.
+  (`getCachedProof()` in `credits.ts`) and Claimable items are flagged
+  (`OwnedNft.claimable`); `NftClaims.claim(block, credit, leaf_index,
+  proof, collection, mint_to)` is live on the testnet Asset Hub, so what
+  remains is the claim builder and the signing seam.

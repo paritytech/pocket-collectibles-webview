@@ -98,6 +98,7 @@ function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
   const mintedAt = coerceMintedAt(obj.mintedAt)
   if (mintedAt !== undefined) item.mintedAt = mintedAt
   if (truthyFlag(obj.pending)) item.pending = true
+  if (truthyFlag(obj.claimable)) item.claimable = true
   // On-chain display metadata from the chain-read path. Same sanitation
   // as displayName; the image URL must be http(s) (never javascript: etc).
   if (typeof obj.name === 'string') {

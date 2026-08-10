@@ -102,15 +102,16 @@ export function buildEntries(nfts: OwnedNft[]): CollectibleEntry[] {
   return nfts.map(buildEntry)
 }
 
-/** Collapse entries that resolve to the same asset into one representative
- *  carrying a `count`. The representative is the most-recently-minted member,
- *  so "Newest" sort reflects the latest copy. Pending and confirmed copies of
- *  the same art stay separate (they're distinct states). Input is not mutated.
- *  Insertion order of first-seen assets is preserved (sortEntries reorders). */
+/** Collapse owned entries that resolve to the same asset into one
+ *  representative carrying a `count`. The representative is the
+ *  most-recently-minted member, so "Newest" sort reflects the latest copy.
+ *  Pending entries never collapse — each is a distinct credit and renders as
+ *  its own tile, even when they share (placeholder) art. Input is not mutated.
+ *  Insertion order of first-seen keys is preserved (sortEntries reorders). */
 export function collapseDuplicates(entries: CollectibleEntry[]): CollectibleEntry[] {
   const groups = new Map<string, { rep: CollectibleEntry; count: number }>()
   for (const e of entries) {
-    const key = `${e.resolved.url}|${e.pending ? 'p' : 'o'}`
+    const key = e.pending ? `p|${e.hash}` : `o|${e.resolved.url}`
     const g = groups.get(key)
     if (!g) { groups.set(key, { rep: e, count: 1 }); continue }
     g.count += 1

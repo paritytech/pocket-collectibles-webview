@@ -44,6 +44,12 @@ export interface OwnedNft {
    *  not yet finalised into `Nfts`. Renders in a dimmed "pending" state
    *  with no mint date. Defaults to false (a confirmed mint). */
   pending?: boolean
+  /** True iff a pending item's credit is verifiable on Asset Hub (its
+   *  merkle root arrived, its leaf is unclaimed), so a claim would mint
+   *  it — the design's Claimable state, as opposed to merely Earned.
+   *  Renders identically to `pending` today; Phase 2's actions key off
+   *  it. Meaningless without `pending`. Defaults to false. */
+  claimable?: boolean
   /** On-chain display name (three-level metadata key `name`), when the
    *  chain-read path resolved one. Overrides the catalogue-derived name. */
   name?: string

@@ -1,0 +1,18 @@
+{
+  "version": 0,
+  "descriptorPath": ".papi/descriptors",
+  "entries": {
+    "gamingnetPeople": {
+      "wsUrl": "wss://gamingnet.substrate.dev/people",
+      "metadata": ".papi/metadata/gamingnetPeople.scale",
+      "genesis": "0x18640e58ac52e3a45921c7ac46e0d0143c80f9137b0ba9ae15be81f44b4909de",
+      "codeHash": "0x5f0e128eff00d4fa4cb4d818e63ca226869ff590e63e90fa6ed132871d5bc248"
+    },
+    "gamingnetAssetHub": {
+      "wsUrl": "wss://gamingnet.substrate.dev/asset-hub",
+      "metadata": ".papi/metadata/gamingnetAssetHub.scale",
+      "genesis": "0x5c553ae24096d5402b86256773a96f80a68d2a713320767fd6480b8540f973e3",
+      "codeHash": "0x266b935bb32f720bf1a1447efe495ae03f6cff9ca744979689d37e1dfc518aff"
+    }
+  }
+}

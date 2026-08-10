@@ -1,5 +1,16 @@
 // Which purse addresses to read.
 //
+/*
+* TEMPORARY SOLUTION TO OPEN QUESTION
+* DEPENDENCY #5/#6
+* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
+*
+* Which accounts collectibles land at, and what host call returns the
+* list a product may see. Until then this module is an injectable seam
+* (sources 1-3 below) with the dev-only deriver as fallback.
+*
+*/
+//
 // pallet-scarcity holds at most one NFT per account, so "the player's
 // collection" is defined by the list of purse addresses they control.
 // WHO decides that list is an open product question (the account-derivation
@@ -13,15 +24,14 @@
 //   2. window.__ACCOUNTS__ set before our JS ran — the future production
 //      seam, same discipline as __COLLECTION__
 //   3. addresses persisted by a previous session
-//   4. the account DERIVER (derive.ts): the //product//scarcity//nft//<i>
-//      convention walked over a fixed window. Dev-only until a host
-//      supplies public keys; an explicit source (1–3, or a later
-//      setAccounts) always wins over it.
+//   4. nothing — the sync loop (start.ts) then gap-scans the purse
+//      subtree of the dev root the player identity maps to. Dev-only
+//      until a host supplies public keys; an explicit source (1–3, or a
+//      later setAccounts) always wins over it.
 // At any later point native may call window.setAccounts([...]) to replace
 // the list (buffer-or-deliver: registered at module load).
 
 import { getSs58AddressInfo } from 'polkadot-api'
-import { isEmbedded } from '../bridge/embed'
 import { deriveAddresses, devKeyAtIndex } from './derive'
 
 export interface AccountSource {
@@ -33,9 +43,6 @@ export interface AccountSource {
 const STORAGE_KEY = 'pkt_dev_addresses_v1'
 
 let addresses: string[] = []
-// True once an explicit source (query param, global, native push) has
-// spoken — the derived fallback then never overwrites it.
-let explicit = false
 const listeners = new Set<(addresses: string[]) => void>()
 
 /** Keep only valid, deduplicated SS58 addresses; drop the rest loudly. */
@@ -72,7 +79,6 @@ function loadPersisted(): string[] {
 
 function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): void {
   addresses = sanitize(list)
-  if (opts.explicit !== false) explicit = true
   if (opts.persist) persist(addresses)
   for (const cb of listeners) {
     try { cb(addresses) } catch { /* a listener throwing can't break the channel */ }
@@ -114,24 +120,12 @@ function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): voi
     const persisted = loadPersisted()
     if (persisted.length > 0) {
       addresses = persisted
-      explicit = true
       return
     }
-    // Nothing explicit: fall back to the deriver. In-page derivation is
-    // dev-only (never inside a host — production waits on the host's
-    // public-key capability). Deferred off the module-load path so 64
-    // sr25519 derivations don't delay first paint; skipped if an explicit
-    // source arrives first.
-    if (!isEmbedded) {
-      window.setTimeout(() => {
-        if (explicit) return
-        try {
-          set(deriveAddresses(devKeyAtIndex()), { persist: false, explicit: false })
-        } catch (err) {
-          console.warn('[chain] account derivation failed', err)
-        }
-      }, 0)
-    }
+    // Nothing explicit: leave the list empty. The sync loop then
+    // gap-scans the purse subtree of whichever dev root the player
+    // identity picks (start.ts scanDerivedOwned) — the dev player when
+    // nothing says otherwise.
   } catch { /* ignore */ }
 })()
 

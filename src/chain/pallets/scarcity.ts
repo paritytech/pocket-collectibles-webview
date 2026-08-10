@@ -1,10 +1,9 @@
 // On-chain read path for pallet-scarcity (Asset Hub).
 //
-// Vendored from the scarcity-tools SDK read surface
-// (gaming-retreat-2026/scarcity-tools/packages/sdk/src/{client,types}.ts,
-// polkadot-api@2.2.2, unsafe/descriptorless API) and narrowed to reads —
-// the webview never signs or submits. Keep the query shapes in sync with
-// that SDK if the pallet evolves.
+// Originally vendored from the scarcity-tools SDK read surface and since
+// migrated to the typed api over generated descriptors — the query shapes
+// now come from .papi/ metadata, so a pallet change surfaces in
+// `papi update` + typecheck rather than by drifting from the SDK.
 //
 // Chain model (pallet-scarcity, "coinage"): `NftsByOwner: AccountId -> Nft`
 // is a plain map — an account holds at most ONE NFT, so a player's
@@ -14,7 +13,8 @@
 // instance -> item -> collection (most specific wins).
 
 import { Binary } from 'polkadot-api'
-import type { OwnedNft } from '../bridge/types'
+import type { OwnedNft } from '../../bridge/types'
+import type { AssetHubApi } from '../client'
 
 /** Metadata key convention carrying the 32-byte identity hash. */
 export const HASH_METADATA_KEY = 'hash'
@@ -23,74 +23,28 @@ export const HASH_METADATA_KEY = 'hash'
 // display-only shelf (a reorged read self-corrects on the next refresh).
 const AT = { at: 'best' } as const
 
-/** `Scarcity.NftsByOwner` value as decoded by the unsafe API
- *  (field names match the pallet's SCALE struct). */
-interface RawNft {
-  instance: bigint
-  collection: number
-  item: number
-  minted_at: bigint
-  last_moved: bigint
-  state_nonce: bigint
-}
-
-/** Metadata storages wrap values as `MetadataEntry { value, deposit }`. */
-interface RawMetadataEntry {
-  value: Uint8Array
-  deposit: bigint
-}
-
-// The unsafe API is untyped by design; this narrow interface is our whole
-// contract with it, so a runtime rename shows up here and nowhere else.
-interface StorageRead {
-  getValue(...args: unknown[]): Promise<unknown>
-  getValues(keys: unknown[][], options?: unknown): Promise<unknown[]>
-}
-export interface ScarcityApi {
-  query: {
-    Scarcity: {
-      NftsByOwner: StorageRead
-      InstanceMetadata: StorageRead
-      ItemMetadata: StorageRead
-      CollectionMetadata: StorageRead
-    }
-  }
-}
-
-/** Validate an unsafe-API result into a RawNft, or null. Field-checks the
- *  shape so a runtime upgrade that changes the struct degrades to "no
- *  items" (plus a warning) instead of NaN timestamps or a crash. */
-function intoRawNft(v: unknown): RawNft | null {
-  if (!v || typeof v !== 'object') return null
-  const o = v as Record<string, unknown>
-  if (
-    typeof o.instance !== 'bigint' ||
-    typeof o.collection !== 'number' ||
-    typeof o.item !== 'number' ||
-    typeof o.minted_at !== 'bigint'
-  ) {
-    console.warn('[chain] NftsByOwner value has unexpected shape', v)
-    return null
-  }
-  return o as unknown as RawNft
-}
+/** `Scarcity.NftsByOwner` value, as the descriptors type it. */
+type Nft = NonNullable<
+  Awaited<ReturnType<AssetHubApi['query']['Scarcity']['NftsByOwner']['getValue']>>
+>
 
 /** Effective metadata value for `key`, resolved instance -> item ->
  *  collection, first match wins (mirrors the pallet's
- *  `instance_metadata_of`). */
+ *  `instance_metadata_of`). Metadata keys/values are `Vec<u8>`, which the
+ *  typed api serves as bytes. */
 async function metadataOf(
-  api: ScarcityApi,
-  nft: RawNft,
+  api: AssetHubApi,
+  nft: Nft,
   key: string
 ): Promise<Uint8Array | undefined> {
   const keyBytes = Binary.fromText(key)
-  const reads: (() => Promise<unknown>)[] = [
+  const reads = [
     () => api.query.Scarcity.InstanceMetadata.getValue(nft.instance, keyBytes, AT),
     () => api.query.Scarcity.ItemMetadata.getValue(nft.collection, nft.item, keyBytes, AT),
     () => api.query.Scarcity.CollectionMetadata.getValue(nft.collection, keyBytes, AT)
   ]
   for (const read of reads) {
-    const entry = (await read()) as RawMetadataEntry | undefined
+    const entry = await read()
     if (entry && entry.value instanceof Uint8Array) return entry.value
   }
   return undefined
@@ -107,9 +61,16 @@ const hashCache = new Map<bigint, string>()
 const NAME_METADATA_KEY = 'name'
 const IMAGE_METADATA_KEY = 'image'
 
-// Where content-addressed artwork is served from. Dev choice mirroring
-// the team's web-demo config; the production artwork origin is an open
-// platform question (DEPENDENCIES.md #17).
+/*
+* TEMPORARY SOLUTION TO OPEN QUESTION
+* DEPENDENCY #17
+* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
+*
+* Which origin serves artwork bytes inside the sandbox, and whether there
+* is an on-device cache. Dev choice mirroring the team's web-demo config
+* until the platform answers.
+*
+*/
 const IPFS_GATEWAY = 'https://gamingnet.substrate.dev'
 
 /** Map an `image` metadata value to a fetchable URL: full http(s) URLs
@@ -123,24 +84,26 @@ export function imageUrlOf(value: string): string | undefined {
   return undefined
 }
 
-/** Read the owned set for a list of purse addresses and map it into the
- *  gallery's bridge shape, resolving identity hash + display name +
- *  artwork per item. Addresses holding nothing are skipped; items missing
- *  the "hash" metadata are skipped with a warning (they cannot be keyed). */
-export async function fetchOwned(api: ScarcityApi, addresses: string[]): Promise<OwnedNft[]> {
+/** One purse read: whether the address holds an NFT at all, and the
+ *  displayable item when it does (an occupied purse whose item lacks the
+ *  "hash" identity metadata is occupied with item null). */
+export interface PurseRead {
+  occupied: boolean
+  item: OwnedNft | null
+}
+
+/** Positional reads — result[i] answers addresses[i]. The gap-limit purse
+ *  scan (chain/start.ts) needs per-index occupancy, not just the items. */
+export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promise<PurseRead[]> {
   if (addresses.length === 0) return []
   const raws = await api.query.Scarcity.NftsByOwner.getValues(
-    addresses.map((a) => [a]),
+    addresses.map((a) => [a] as [string]),
     AT
   )
-  const hits: RawNft[] = []
-  for (const raw of raws) {
-    if (raw === undefined || raw === null) continue // address holds no NFT
-    const nft = intoRawNft(raw)
-    if (nft) hits.push(nft)
-  }
-  const owned = await Promise.all(
-    hits.map(async (nft): Promise<OwnedNft | null> => {
+  return Promise.all(
+    raws.map(async (raw): Promise<PurseRead> => {
+      if (raw === undefined || raw === null) return { occupied: false, item: null }
+      const nft = raw as Nft
       let hash = hashCache.get(nft.instance)
       const reads = await Promise.all([
         hash ? Promise.resolve(undefined) : metadataOf(api, nft, HASH_METADATA_KEY),
@@ -151,7 +114,7 @@ export async function fetchOwned(api: ScarcityApi, addresses: string[]): Promise
         const bytes = reads[0]
         if (!bytes) {
           console.warn(`[chain] instance ${nft.instance} has no "${HASH_METADATA_KEY}" metadata; skipped`)
-          return null
+          return { occupied: true, item: null }
         }
         hash = Binary.toHex(bytes)
         hashCache.set(nft.instance, hash)
@@ -162,8 +125,16 @@ export async function fetchOwned(api: ScarcityApi, addresses: string[]): Promise
         const url = imageUrlOf(Binary.toText(reads[2]))
         if (url) item.imageUrl = url
       }
-      return item
+      return { occupied: true, item }
     })
   )
-  return owned.filter((o): o is OwnedNft => o !== null)
+}
+
+/** Read the owned set for a list of purse addresses and map it into the
+ *  gallery's bridge shape, resolving identity hash + display name +
+ *  artwork per item. Addresses holding nothing are skipped; items missing
+ *  the "hash" metadata are skipped with a warning (they cannot be keyed). */
+export async function fetchOwned(api: AssetHubApi, addresses: string[]): Promise<OwnedNft[]> {
+  const reads = await fetchOwnedAt(api, addresses)
+  return reads.map((r) => r.item).filter((o): o is OwnedNft => o !== null)
 }

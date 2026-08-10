@@ -12,10 +12,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --host",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "papi",
+    "chain:update": "papi update",
+    "prebuild": "papi update"
   },
   "dependencies": {
     "@noble/hashes": "^2.3.0",
+    "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-labs/hdkd": "^0.0.29",
     "@polkadot-labs/hdkd-helpers": "^0.0.31",
     "gsap": "^3.12.5",

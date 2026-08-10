@@ -4,6 +4,17 @@
 //   - People Chain: the credit map (what the player earned)
 //   - Asset Hub:    NftsByOwner + metadata (what is minted, and where)
 //
+/*
+* TEMPORARY SOLUTION TO OPEN QUESTION
+* NO DEPENDENCY NUMBER (not in the table yet)
+* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
+*
+* The host chain-provider bridge is proposed in NATIVE_SPEC.md §11 and
+* needs native sign-off; the direct-WebSocket dev fallback below is the
+* agreed interim way to start.
+*
+*/
+//
 // Production rule: the HOST supplies every chain connection — the webview
 // opens no sockets of its own. This module owns that seam. Until hosts
 // implement it, a non-embedded dev build falls back to direct WebSockets
