@@ -143,6 +143,12 @@ function set(raw: unknown, opts: { persist: boolean }): void {
   } catch { /* ignore */ }
 })()
 
+/** The identity as of right now — for consumers that need a synchronous
+ *  read (e.g. scoping the collection cache) rather than a subscription. */
+export function currentIdentity(): PlayerIdentity | null {
+  return identity
+}
+
 export interface IdentitySource {
   /** Calls cb with the current identity (or null) immediately, then again
    *  on every change. Returns an unsubscribe function. */

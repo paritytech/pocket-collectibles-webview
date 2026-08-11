@@ -94,6 +94,13 @@ function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): voi
 ;(function takeInitial(): void {
   try {
     const params = new URLSearchParams(window.location.search)
+    // An explicit ?player=/?alias= (without ?address=) means "show me this
+    // identity's shelf": a persisted address list from an earlier ?address=
+    // session would shadow the identity's purse scan forever, so drop it.
+    // Both are dev affordances — the current URL outranks old leftovers.
+    if (!params.get('address') && (params.get('player') || params.get('alias'))) {
+      try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
+    }
     // ?derive=1 forces the deriver and clears any stale persisted list
     // (a previous ?address= session would otherwise shadow it forever).
     if (params.get('derive') === '1') {
@@ -128,6 +135,12 @@ function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): voi
     // nothing says otherwise.
   } catch { /* ignore */ }
 })()
+
+/** The address list as of right now — for consumers that need a synchronous
+ *  read (e.g. scoping the collection cache) rather than a subscription. */
+export function currentAddresses(): string[] {
+  return addresses
+}
 
 export function getAccountSource(): AccountSource {
   return {
