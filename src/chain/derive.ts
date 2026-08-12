@@ -11,15 +11,17 @@
 *
 */
 //
-// CONVENTION (interim, decided by us 2026-08-07, NOT platform-ratified —
-// open dependency #5 in DEPENDENCIES.md): the player's i-th collectible
-// purse is derived from their root key at
+// CONVENTION (interim, NOT platform-ratified — open dependency #5 in
+// DEPENDENCIES.md): the player's i-th collectible purse is derived from
+// their root key at
 //
-//     //product//scarcity//nft//<i>        (sr25519 hard derivation)
+//     //nft//<i>                           (sr25519 hard derivation)
 //
-// modelled on the platform's observed product-subtree pattern
-// (`//product//dim2.dot/0`). If the platform ratifies a different rule,
-// PURSE_PATH is the only line that changes.
+// This is the retreat scarcity-tools web-demo's convention, adopted
+// 2026-08-11 (replacing our 2026-08-07 `//product//scarcity//nft//<i>`)
+// so both in-house minting surfaces target the same purses — items the
+// retreat pipeline claims land where this shelf scans. If the platform
+// ratifies a different rule, pursePath() is the only line that changes.
 //
 // Key material: the page holds no secrets (design doc §3.7), so the
 // deriver works through a `KeyAtIndex` capability that yields PUBLIC keys
@@ -42,7 +44,7 @@ import { DEV_PHRASE, entropyToMiniSecret, mnemonicToEntropy, ss58Address } from 
 
 /** The purse convention. Index -> derivation path. */
 export function pursePath(index: number): string {
-  return `//product//scarcity//nft//${index}`
+  return `//nft//${index}`
 }
 
 /** How many purse indexes to derive and read per poll. Stays under
