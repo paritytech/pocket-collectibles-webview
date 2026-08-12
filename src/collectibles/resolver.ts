@@ -294,6 +294,18 @@ const PLACEHOLDER_ART =
       '</svg>'
   )
 
+/** Light variant of the placeholder for unclaimed tiles, whose frame is
+ *  white — the same "?" motif drawn in soft greys so it reads on light. */
+const PLACEHOLDER_ART_LIGHT =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+      '<rect width="512" height="512" rx="64" fill="#f6f4fa"/>' +
+      '<circle cx="256" cy="256" r="120" fill="#e7e3f0"/>' +
+      '<text x="256" y="300" font-size="140" text-anchor="middle" fill="#8a84a8" font-family="system-ui">?</text>' +
+      '</svg>'
+  )
+
 /** Build a ResolvedCollectible from ON-CHAIN data only — no catalogue
  *  lookup. Name and artwork come from chain metadata (fallbacks: a serial
  *  code and a neutral placeholder); rarity and glow stay derived from the
@@ -301,7 +313,8 @@ const PLACEHOLDER_ART =
 export function chainCollectible(
   hashHex: string,
   name: string | undefined,
-  url: string | undefined
+  url: string | undefined,
+  placeholder: 'dark' | 'light' = 'dark'
 ): ResolvedCollectible {
   const cleaned = (hashHex || '').trim()
   const hex = (cleaned.startsWith('0x') || cleaned.startsWith('0X') ? cleaned.slice(2) : cleaned).toLowerCase()
@@ -314,7 +327,7 @@ export function chainCollectible(
     : '138 132 168'
   const code = valid ? `${hex.slice(0, 4)}·${hex.slice(-4)}`.toUpperCase() : 'UNKNOWN'
   return {
-    url: url ?? PLACEHOLDER_ART,
+    url: url ?? (placeholder === 'light' ? PLACEHOLDER_ART_LIGHT : PLACEHOLDER_ART),
     filename: '',
     name: name ?? `Collectible ${code}`,
     collection: '',

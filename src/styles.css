@@ -402,8 +402,20 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
-.tile--pending .tile-frame { opacity: 0.66; }
+/* Unclaimed: a white frame — the tile reads as an empty slot waiting to be
+   filled, in deliberate contrast to the dark space of revealed items. */
+.tile--pending .tile-frame {
+  background: radial-gradient(circle at 50% 48%, #ffffff 0%, #f3f1f8 70%, #eae6f2 100%);
+}
 .tile--pending .tile-art { animation: pendingPulse 2.2s ease-in-out infinite; }
+/* The shared badge colours are tuned for dark frames — flip to dark-on-light
+   on the white unclaimed frame. */
+.tile--pending .tile-pending-badge {
+  color: rgba(38, 34, 58, 0.72);
+  background: rgba(20, 16, 40, 0.07);
+  border-color: rgba(20, 16, 40, 0.14);
+}
+.tile--pending .tile-art--fallback { color: rgba(38, 34, 58, 0.35); }
 @keyframes pendingPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.95; } }
 
 /* Tile meta */

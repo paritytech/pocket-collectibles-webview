@@ -93,7 +93,7 @@ export default function CollectibleTile({ entry, onOpen }: CollectibleTileProps)
           )}
         </div>
         {resolved.isRare && <span className="tile-rare-badge" aria-hidden="true">✦ RARE</span>}
-        {pending && <span className="tile-pending-badge">PENDING</span>}
+        {pending && <span className="tile-pending-badge">UNCLAIMED</span>}
         {entry.count && entry.count > 1 && (
           <span className="tile-count-badge" aria-hidden="true">×{entry.count}</span>
         )}
