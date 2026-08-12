@@ -20,7 +20,7 @@ flowchart TD
     clients --> loop["poll loop (§2)"]
 
     accounts["accounts.ts — purse addresses<br/>?address= | window.setAccounts<br/>| persisted | derived"] -.-> loop
-    derive["derive.ts — account deriver<br/>//product//scarcity//nft//i × 64<br/>(interim convention; dev keys from<br/>DEV_PHRASE, host key capability later)"] -.-> accounts
+    derive["derive.ts — account deriver<br/>//nft//i (retreat web-demo convention,<br/>adopted 2026-08-11; dev keys from<br/>DEV_PHRASE, host key capability later)"] -.-> accounts
     identity["identity.ts — player identity<br/>?player= / ?alias= |<br/>window.setPlayerIdentity | persisted"] -.-> loop
 ```
 
@@ -63,13 +63,13 @@ sequenceDiagram
 
     Note over ST: fetchClaimStates() (chain/pallets/claims.ts, Asset Hub):<br/>NftClaims.CreditTrees(block) — root arrived?<br/>NftClaims.ClaimedCredits(block) — leaf claimed?
 
-    Note over ST: mergeShelf():<br/>minted hash wins over same-hash credit;<br/>root not on Asset Hub → pending (wrapped/Earned);<br/>root there, leaf unclaimed → pending + claimable;<br/>leaf claimed elsewhere → withheld from the shelf.
+    Note over ST: mergeShelf():<br/>minted hash wins over same-hash credit;<br/>root not on Asset Hub → pending (wrapped/Earned);<br/>root there, leaf unclaimed → pending + claimable;<br/>leaf claimed → credit dropped, its item<br/>shows up via the scan on its own.
 
     ST->>CO: deliverCollection({ owned })
     Note over CO: same store the native push bridge feeds:<br/>coerce → dedup by hash → generation bump<br/>only if the item SET changed
     CO->>CO: write-back localStorage cache
     CO-->>UI: snapshot → render shelf
-    Note over UI: cache-first: shelf rendered from cache at boot,<br/>this delivery corrects it
+    Note over UI: cache-first: shelf rendered from cache at boot<br/>(only when the cache was saved under the same<br/>identity + address inputs), this delivery corrects it
 ```
 
 ## What each module owns
@@ -81,8 +81,8 @@ sequenceDiagram
 | `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, three-level `"hash"` metadata (vendored from the scarcity-tools SDK) |
 | `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer (proof cache for Phase 2) |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
-| `chain/accounts.ts` | the purse-address seam (explicit sources win over the deriver) |
-| `chain/derive.ts` | the account deriver: `//product//scarcity//nft//i` (interim convention, decided 2026-08-07, not platform-ratified) over a `KeyAtIndex` capability — dev impl derives from `DEV_PHRASE` in-page; production waits on the host's public-key-at-index API |
+| `chain/accounts.ts` | the purse-address seam (explicit sources win over the deriver; an explicit `?player=`/`?alias=` URL clears a persisted `?address=` leftover) |
+| `chain/derive.ts` | the account deriver: `//nft//i` (the retreat web-demo's convention, adopted 2026-08-11 so both in-house minting surfaces share purses; interim, not platform-ratified) over a `KeyAtIndex` capability — dev impl derives from `DEV_PHRASE` in-page; production waits on the host's public-key-at-index API |
 | `chain/identity.ts` | the player-identity seam |
 | `chain/start.ts` | the loop: inputs → parallel fetch → mergeShelf → deliverCollection; errors → `flow.error phase=chain` + backoff |
 | `bridge/collection.ts` | the single store both the chain sync and the native push feed |
@@ -90,14 +90,32 @@ sequenceDiagram
 ## Not implemented yet (marked seams)
 
 - **The purse convention is interim** (dependency #5) — `derive.ts`
-  implements `//product//scarcity//nft//i` as our own decision pending
-  platform ratification; only `pursePath()` changes if the rule changes.
-  The host "public key at an index" capability has no implementation yet,
-  so in-page dev derivation carries it.
-- **Credit-hash == item-hash assumption** — merging assumes a minted
-  item's `"hash"` metadata equals the credit hash.
+  implements the retreat web-demo's `//nft//i` (adopted 2026-08-11,
+  replacing our `//product//scarcity//nft//i`, so items the retreat
+  pipeline mints/claims land where this shelf scans) pending platform
+  ratification; only `pursePath()` changes if the rule changes. The host
+  "public key at an index" capability has no implementation yet, so
+  in-page dev derivation carries it.
+- **Credit-hash == item-hash assumption — VERIFIED FALSE for pallet
+  claims (2026-08-11)**: `pallet-nft-claims::claim` mints with empty
+  metadata (`mint_without_deposit(.., Vec::new())`), so a claim-minted
+  item never carries the credit hash; only tooling-minted items do.
+  Model adopted 2026-08-12 (matches George's design direction): claimed
+  credits are DROPPED from the shelf — the shared purse convention means
+  their item arrives via the scan, and ownership is the whole story the
+  shelf tells. Hashless items (the pallet claim is the only metadata-less
+  minter) are keyed `instance-<id>` so they still render. Which credit
+  an item came from stays unrecorded on-chain — only the `CreditClaimed`
+  event (block/leaf/collection/item/owner/instance) has it,
+  archive-walk-only; if provenance ever becomes a product requirement,
+  the fix is a runtime change (write the credit into the instance's
+  `"hash"` metadata at claim time) or an indexer. Replaying the pallet's
+  item selection to guess was tried and REJECTED (fails silently when
+  the collection grows).
 - **Claiming/minting** (Phase 2) — proofs are already fetched and cached
   (`getCachedProof()` in `credits.ts`) and Claimable items are flagged
   (`OwnedNft.claimable`); `NftClaims.claim(block, credit, leaf_index,
   proof, collection, mint_to)` is live on the testnet Asset Hub, so what
-  remains is the claim builder and the signing seam.
+  remains is the claim builder, the signing seam — and the identity
+  carry-through above, without which a fresh claim's item won't show as
+  the credit it came from.

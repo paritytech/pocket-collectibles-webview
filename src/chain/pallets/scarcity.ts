@@ -112,11 +112,16 @@ export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promi
       ])
       if (!hash) {
         const bytes = reads[0]
-        if (!bytes) {
-          console.warn(`[chain] instance ${nft.instance} has no "${HASH_METADATA_KEY}" metadata; skipped`)
-          return { occupied: true, item: null }
+        if (bytes) {
+          hash = Binary.toHex(bytes)
+        } else {
+          // No identity hash at any tier — the signature of a
+          // pallet-claimed item (the claim mints with empty metadata,
+          // READ_PATH.md; every tooling mint writes the hash). The item
+          // is real and owned: key it by its instance id — unique,
+          // stable, impossible to confuse with a 32-byte credit hash.
+          hash = `instance-${nft.instance}`
         }
-        hash = Binary.toHex(bytes)
         hashCache.set(nft.instance, hash)
       }
       const item: OwnedNft = { hash, mintedAt: Number(nft.minted_at) }
@@ -138,3 +143,4 @@ export async function fetchOwned(api: AssetHubApi, addresses: string[]): Promise
   const reads = await fetchOwnedAt(api, addresses)
   return reads.map((r) => r.item).filter((o): o is OwnedNft => o !== null)
 }
+

@@ -39,9 +39,11 @@ export function shortHash(hash: string): string {
 
 /** Compact, distinctive code for a tile badge: two 4-char groups from the
  *  head + tail of the hash, uppercased. Stable per hash, reads like a
- *  serial number ("7F3A·9C2B"). */
+ *  serial number ("7F3A·9C2B"). Synthetic identities (hashless
+ *  pallet-claimed items keyed "instance-<id>") pass through whole. */
 export function shortCode(hash: string): string {
   const h = strip0x(hash).toUpperCase()
+  if (!/^[0-9A-F]+$/.test(h)) return h
   if (h.length < 8) return h
   return `${h.slice(0, 4)}·${h.slice(-4)}`
 }
@@ -85,7 +87,12 @@ export function formatRelative(mintedAt: number | undefined, now: number = Date.
 export function buildEntry(nft: OwnedNft): CollectibleEntry {
   const hash = strip0x(nft.hash).toLowerCase()
   const hashHex = `0x${hash}`
-  const resolved = chainCollectible(nft.hash, nft.name, nft.imageUrl)
+  // Unclaimed tiles render on a white frame, so they get the light
+  // placeholder when there's no artwork yet.
+  const resolved = chainCollectible(
+    nft.hash, nft.name, nft.imageUrl,
+    nft.pending === true ? 'light' : 'dark'
+  )
   const entry: CollectibleEntry = {
     hash,
     hashHex,

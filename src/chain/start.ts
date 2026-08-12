@@ -4,17 +4,19 @@
 //   People Chain  Game.NftClaimCredits  -> what the player EARNED
 //   Asset Hub     Scarcity.NftsByOwner  -> what is MINTED, and where
 //
-// Every credit becomes one item. A credit whose hash matches a minted
-// item's identity hash is that item, already Owned; the rest split by
-// Asset Hub's nft-claims state (chain/pallets/claims.ts): root not arrived ->
+// Every credit becomes one item. Unminted credits split by Asset Hub's
+// nft-claims state (chain/pallets/claims.ts): root not arrived ->
 // Earned, root present and leaf unclaimed -> Claimable (both render
 // wrapped, `pending: true`; Claimable additionally carries
-// `claimable: true` for Phase 2's actions), leaf claimed but the item
-// at none of our purses -> minted by another device or the auto-claim,
-// withheld from the shelf until the purse scan finds it. ASSUMPTION,
-// verify with the minter-contract work: the minted item's "hash"
-// metadata equals the credit hash (identity carried through the mint).
-// Contained to mergeShelf() below.
+// `claimable: true` for Phase 2's actions). CLAIMED credits are dropped
+// from the shelf (decided 2026-08-12): the shared purse convention means
+// their item appears via the scan on its own, and ownership is the whole
+// story the shelf tells. Which credit an item came from is unrecorded
+// on-chain anyway — pallet-nft-claims' claim mints with EMPTY metadata
+// (`mint_without_deposit(.., Vec::new())`, verified 2026-08-11), so a
+// claim-minted item carries no credit hash (such items key by instance
+// id, see pallets/scarcity.ts); the credit->instance link exists only in
+// the CreditClaimed event (archive walk).
 //
 // Results land in the SAME collection store the native push bridge feeds
 // (bridge/collection.ts): cache-first render, boot resolution,
@@ -63,10 +65,9 @@ let generation = 0
 
 /** Owned items win over credits with the same hash; unminted credits
  *  render as wrapped (`pending`), Claimable ones flagged for Phase 2's
- *  actions; credits Asset Hub says are claimed elsewhere are withheld
- *  (offering a claim that can only fail AlreadyClaimed helps nobody).
- *  Store keys are normalized (lowercase, no 0x), so compare the same
- *  way. */
+ *  actions; claimed credits are dropped — the shared purse convention
+ *  means their item shows up via the scan on its own. Store keys are
+ *  normalized (lowercase, no 0x), so compare the same way. */
 function mergeShelf(
   owned: OwnedNft[],
   credits: Credit[],
@@ -78,10 +79,7 @@ function mergeShelf(
     const key = credit.hash.replace(/^0x/i, '').toLowerCase()
     if (mintedKeys.has(key)) continue
     const state = claimStates.get(credit.hash) ?? 'earned'
-    if (state === 'claimed') {
-      console.warn('[chain] a claimed credit is minted at none of our purses; withheld')
-      continue
-    }
+    if (state === 'claimed') continue
     earned.push({
       hash: credit.hash,
       pending: true,
