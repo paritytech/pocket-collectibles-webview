@@ -402,21 +402,58 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
-/* Unclaimed: a white frame — the tile reads as an empty slot waiting to be
-   filled, in deliberate contrast to the dark space of revealed items. */
-.tile--pending .tile-frame {
-  background: radial-gradient(circle at 50% 48%, #ffffff 0%, #f3f1f8 70%, #eae6f2 100%);
+/* Unclaimed: no cell background — the wrapped parcel floats directly in the
+   dark space like every revealed item, its pastel paper carrying the
+   contrast that the white frame used to. */
+.tile--pending .tile-frame { background: transparent; }
+
+/* ---------- Gift bundle (unclaimed credits) ----------
+   The credit renders as a wrapped parcel (GiftBundle): hash-picked paper +
+   ribbon, a periodic rock on its base, a lid that peeks open, and gold
+   glints — it should look like it WANTS to be unwrapped. Every instance
+   offsets its phase via --gift-delay so a shelf of parcels fidgets out of
+   sync rather than marching in unison. */
+.gift {
+  animation: giftWiggle 3.8s ease-in-out infinite;
+  animation-delay: var(--gift-delay, 0s);
+  transform-origin: 50% 88%;   /* rock on the box's base, not its centre */
+  will-change: transform;
 }
-.tile--pending .tile-art { animation: pendingPulse 2.2s ease-in-out infinite; }
-/* The shared badge colours are tuned for dark frames — flip to dark-on-light
-   on the white unclaimed frame. */
-.tile--pending .tile-pending-badge {
-  color: rgba(38, 34, 58, 0.72);
-  background: rgba(20, 16, 40, 0.07);
-  border-color: rgba(20, 16, 40, 0.14);
+.gift-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.tile-gift { position: relative; width: 100%; height: 100%; }
+.detail-gift { position: relative; z-index: 2; width: 100%; height: 100%; }
+/* Lid + bow lift a touch mid-wiggle — same duration/delay as giftWiggle so
+   the peek always lands inside the shake. Never lifts past the lid/body
+   overlap, so no gap opens between them. */
+.gift-lid {
+  animation: giftLidPeek 3.8s ease-in-out infinite;
+  animation-delay: var(--gift-delay, 0s);
 }
-.tile--pending .tile-art--fallback { color: rgba(38, 34, 58, 0.35); }
-@keyframes pendingPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 0.95; } }
+.gift-spark {
+  animation: giftSpark 2.7s ease-in-out infinite;
+  animation-delay: var(--gift-delay, 0s);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.gift-spark--late { animation-delay: calc(var(--gift-delay, 0s) + 1.3s); }
+/* Long rest, then a quick excited shake with a squash-and-stretch. */
+@keyframes giftWiggle {
+  0%, 55%, 82%, 100% { transform: rotate(0deg) scale(1, 1); }
+  60% { transform: rotate(-4deg) scale(1.03, 0.96); }
+  66% { transform: rotate(3.2deg) scale(0.97, 1.04); }
+  72% { transform: rotate(-2deg) scale(1.01, 0.99); }
+  77% { transform: rotate(1deg) scale(1, 1); }
+}
+@keyframes giftLidPeek {
+  0%, 55%, 82%, 100% { transform: translateY(0); }
+  62% { transform: translateY(-2.6px); }
+  68% { transform: translateY(-0.8px); }
+  74% { transform: translateY(-2px); }
+}
+@keyframes giftSpark {
+  0%, 14%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg); }
+  7% { opacity: 1; transform: scale(1) rotate(18deg); }
+}
 
 /* Tile meta */
 .tile-meta { padding: 9px 4px 2px; }
@@ -941,6 +978,7 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .tile-art, .tile-bloom, .detail-rays, .detail-shimmer, .boot-mark, .empty-orb,
   .intro-card, .infotip-overlay, .infotip-card,
+  .gift, .gift-lid, .gift-spark,
   .detail-send-hint { animation: none !important; }
 }
 

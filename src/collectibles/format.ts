@@ -75,12 +75,10 @@ export function formatRelative(mintedAt: number | undefined, now: number = Date.
 export function buildEntry(nft: OwnedNft): CollectibleEntry {
   const hash = normalizeHash(nft.hash)
   const hashHex = `0x${hash}`
-  // Unclaimed tiles render on a white frame, so they get the light
-  // placeholder when there's no artwork yet.
-  const resolved = chainCollectible(
-    nft.hash, nft.name, nft.imageUrl,
-    nft.pending === true ? 'light' : 'dark'
-  )
+  // Unclaimed entries render as a wrapped gift bundle (GiftBundle) in both
+  // the tile and the detail hero, so their resolved art is never shown —
+  // the placeholder variant doesn't matter for them.
+  const resolved = chainCollectible(nft.hash, nft.name, nft.imageUrl)
   const entry: CollectibleEntry = {
     hash,
     hashHex,
