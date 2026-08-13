@@ -26,7 +26,8 @@
  * api serves as 0x-hex strings; normalize to lowercase before comparing.
 */
 
-import { Enum, getSs58AddressInfo, Binary } from 'polkadot-api'
+import { Enum } from 'polkadot-api'
+import { pubkeyHexOf } from '../ss58'
 import type { PlayerIdentity } from '../identity'
 import type { PeopleApi } from '../client'
 
@@ -34,14 +35,6 @@ const AT = { at: 'best' } as const
 
 /** The `AccountOrPerson` claimant, as the descriptors type it. */
 type Claimant = Parameters<PeopleApi['apis']['NftCreditsApi']['nft_claim_credit_roots']>[0]
-
-/** An inclusion proof as served by `nft_claim_credit_proofs` — kept for
- *  the Phase 2 claim flow. Derived from the descriptors, so
- *  `papi update` keeps it honest. */
-type ProofsResult = Awaited<
-  ReturnType<PeopleApi['apis']['NftCreditsApi']['nft_claim_credit_proofs']>
->
-export type CreditProof = Extract<ProofsResult, { success: true }>['value'][number]
 
 /** One awarded credit, as the shelf needs it. `awardedAt`/`root`/`leaf`
  *  are present once the credit's block has its root (a block later);
@@ -71,13 +64,9 @@ function isSamePlayer(
   identity: PlayerIdentity
 ): boolean {
   if (identity.kind === 'account' && decoded.type === 'Account' && typeof decoded.value === 'string') {
-    try {
-      const a = getSs58AddressInfo(decoded.value)
-      const b = getSs58AddressInfo(identity.address)
-      return a.isValid && b.isValid && Binary.toHex(a.publicKey) === Binary.toHex(b.publicKey)
-    } catch {
-      return false
-    }
+    const a = pubkeyHexOf(decoded.value)
+    const b = pubkeyHexOf(identity.address)
+    return a !== null && a === b
   }
   if (identity.kind === 'alias' && decoded.type === 'Person' && typeof decoded.value === 'string') {
     return decoded.value.toLowerCase() === identity.alias.toLowerCase()
@@ -85,18 +74,12 @@ function isSamePlayer(
   return false
 }
 
-// Proofs are immutable once a block's root exists; cache per credit hash
-// so the claim flow (and repeat polls) never re-fetch them.
-const proofCache = new Map<string, CreditProof>()
-
-/** The cached inclusion proof for a credit (0x-hex hash), if any poll has
- *  seen it. Phase 2's claim builder starts here. */
-export function getCachedProof(hash: string): CreditProof | undefined {
-  return proofCache.get(hash.toLowerCase())
-}
-
-/** Credits of one ROOTED award block, via the proofs runtime API (also
- *  primes the proof cache). Falls back to [] on pruned/errored blocks. */
+/** Credits of one ROOTED award block, via the proofs runtime API.
+ *  Falls back to [] on pruned/errored blocks. Note for Phase 2: the same
+ *  API hands out ready-made inclusion proofs — the claim builder should
+ *  re-fetch at claim time rather than cache across polls (a cache here
+ *  was removed 2026-08-12: unbounded, uncalled, and mis-keyed vs the
+ *  store's normalized hashes). */
 async function creditsOfRootedBlock(
   api: PeopleApi,
   who: Claimant,
@@ -122,7 +105,6 @@ async function creditsOfRootedBlock(
       root,
       leaf: proof.leaf.toLowerCase()
     })
-    proofCache.set(hash, proof)
   }
   return credits
 }

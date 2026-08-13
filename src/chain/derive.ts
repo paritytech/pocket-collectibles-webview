@@ -38,22 +38,42 @@
 // batched, so a window costs one round trip and empty purses simply
 // return nothing. Gap-limit scanning can replace this if windows get big.
 
-import { getSs58AddressInfo, Binary } from 'polkadot-api'
+import { Binary } from 'polkadot-api'
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd'
 import { DEV_PHRASE, entropyToMiniSecret, mnemonicToEntropy, ss58Address } from '@polkadot-labs/hdkd-helpers'
+import { pubkeyHexOf } from './ss58'
 
 /** The purse convention. Index -> derivation path. */
 export function pursePath(index: number): string {
   return `//nft//${index}`
 }
 
-/** How many purse indexes to derive and read per poll. Stays under
- *  start.ts's MAX_ACCOUNTS (100); one batched read either way. */
-export const PURSE_WINDOW = 64
-
 /** Public key for the purse at `index`. The production seam: a host
  *  implementation must answer WITHOUT exposing any secret to the page. */
 export type KeyAtIndex = (index: number) => Uint8Array
+
+// The DEV_PHRASE deriver, built once. mnemonic -> entropy -> mini-secret
+// is real key-stretching work; the scan used to redo it for every single
+// address, every poll. This is also the ONE construction site to swap
+// when the host's key capability (dependency #5) replaces in-page
+// derivation.
+let deriver: ((path: string) => { publicKey: Uint8Array }) | null = null
+function devDerive(path: string): { publicKey: Uint8Array } {
+  if (!deriver) deriver = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
+  return deriver(path)
+}
+
+// Derivations are pure — memoize path -> address so repeat polls over the
+// same purse window cost map lookups, not sr25519 work.
+const addressCache = new Map<string, string>()
+function devAddressOfPath(path: string): string {
+  let address = addressCache.get(path)
+  if (!address) {
+    address = ss58Address(devDerive(path).publicKey, 42)
+    addressCache.set(path, address)
+  }
+  return address
+}
 
 /** Dev-only key source: derives from the public dev mnemonic in-page.
  *  Matches scarcity-tools' devAccount() derivation, so purses line up
@@ -61,15 +81,13 @@ export type KeyAtIndex = (index: number) => Uint8Array
  *  owner: '' is the bare dev-player root (the gallery's default shelf),
  *  '//Bob' is dev Bob's subtree. */
 export function devKeyAtIndex(rootPath = ''): KeyAtIndex {
-  const derive = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
-  return (index) => derive(`${rootPath}${pursePath(index)}`).publicKey
+  return (index) => devDerive(`${rootPath}${pursePath(index)}`).publicKey
 }
 
 /** Dev-only: the address at `path` from the dev mnemonic ('' = the bare
  *  dev-player root the default shelf derives from, '//Bob' = dev Bob). */
 export function devAddressAt(path = ''): string {
-  const derive = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
-  return ss58Address(derive(path).publicKey, 42)
+  return devAddressOfPath(path)
 }
 
 /** The well-known dev identities every Substrate tool means by "bob". */
@@ -81,14 +99,13 @@ const DEV_NAMES = ['alice', 'bob', 'charlie', 'dave', 'eve', 'ferdie'] as const
 export function devAddressOf(input: string): string | undefined {
   const name = input.trim().toLowerCase() as (typeof DEV_NAMES)[number]
   if (!DEV_NAMES.includes(name)) return undefined
-  const derive = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
   const cased = name[0].toUpperCase() + name.slice(1)
-  return ss58Address(derive(`//${cased}`).publicKey, 42)
+  return devAddressOfPath(`//${cased}`)
 }
 
 /** One purse address of a dev-held root ('' = dev player, '//Bob'). */
 export function devPurseAddress(rootPath: string, index: number): string {
-  return ss58Address(devKeyAtIndex(rootPath)(index), 42)
+  return devAddressOfPath(`${rootPath}${pursePath(index)}`)
 }
 
 // Public-key hex -> dev root path, for every root the page can derive
@@ -107,31 +124,14 @@ const ALL_DEV_NAMES = [
  *  hold a secret for (an arbitrary address: purse derivation impossible,
  *  by design — production purses come from the host, dependency #5). */
 export function devRootPathOf(address: string): string | null {
-  const info = (() => {
-    try { return getSs58AddressInfo(address) } catch { return { isValid: false as const } }
-  })()
-  if (!info.isValid) return null
+  const key = pubkeyHexOf(address)
+  if (!key) return null
   if (!devRootIndex) {
-    const derive = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
-    devRootIndex = new Map([[Binary.toHex(derive('').publicKey), '']])
+    devRootIndex = new Map([[Binary.toHex(devDerive('').publicKey), '']])
     for (const name of ALL_DEV_NAMES) {
-      devRootIndex.set(Binary.toHex(derive(`//${name}`).publicKey), `//${name}`)
+      devRootIndex.set(Binary.toHex(devDerive(`//${name}`).publicKey), `//${name}`)
     }
   }
-  return devRootIndex.get(Binary.toHex(info.publicKey)) ?? null
+  return devRootIndex.get(key) ?? null
 }
 
-/** The derived purse addresses (SS58, generic prefix 42), one per index
- *  in the window. */
-export function deriveAddresses(keyAt: KeyAtIndex, window = PURSE_WINDOW): string[] {
-  const addresses: string[] = []
-  for (let index = 0; index < window; index++) {
-    try {
-      addresses.push(ss58Address(keyAt(index), 42))
-    } catch (err) {
-      console.warn(`[chain] purse derivation failed at index ${index}`, err)
-      break
-    }
-  }
-  return addresses
-}

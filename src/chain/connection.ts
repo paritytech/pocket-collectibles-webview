@@ -104,12 +104,21 @@ function hostTransport(): ((json: string) => void) | null {
 function hostProvider(chain: ChainId, post: (json: string) => void): JsonRpcProvider {
   return (onMessage) => {
     const inbox = inboxes[chain]
+    // The protocol is app-driven: responses and subscription notifications
+    // only ever follow OUR requests, so anything queued while no session
+    // was connected belongs to a DEAD session (a poll error destroys the
+    // client; native keeps streaming its tail). Replaying it into this
+    // fresh client would match foreign request ids and wedge it — drop.
+    if (inbox.buffered.length > 0) {
+      console.warn(`[chain] dropped ${inbox.buffered.length} stale bridge message(s) for ${chain}`)
+      inbox.buffered.length = 0
+    }
     inbox.deliver = onMessage
-    while (inbox.buffered.length > 0) onMessage(inbox.buffered.shift()!)
     return {
       send: (msg) => post(JSON.stringify({ chain, msg })),
       disconnect: () => {
         if (inbox.deliver === onMessage) inbox.deliver = null
+        inbox.buffered.length = 0
       }
     }
   }

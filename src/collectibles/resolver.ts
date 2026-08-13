@@ -19,6 +19,7 @@
 // only async work (loading the IPFS image) happens in the <img> tag.
 
 import cidMap from './cid_map.json'
+import { normalizeHash, shortCode } from '../lib/hash'
 
 /** Paseo Bulletin Next IPFS gateway. Serves catalogue images at `/ipfs/<cid>`. */
 const IPFS_GATEWAY = 'https://paseo-bulletin-next-ipfs.polkadot.io/ipfs'
@@ -271,6 +272,11 @@ export interface ResolvedCollectible {
    *  the swatch hex baked into the catalogue filename. Feeds the `--glow` CSS
    *  var so each collectible's halo matches its dominant colour. */
   glow: string
+  /** False when `url` is the shared "?" placeholder rather than the item's
+   *  own artwork (chain path only; catalogue entries always carry art).
+   *  Items without art are never visually identical — collapseDuplicates
+   *  keys them by hash instead of url. */
+  hasArt?: boolean
 }
 
 /** Parse a uint16 from two consecutive bytes at the given byte offset. */
@@ -316,8 +322,7 @@ export function chainCollectible(
   url: string | undefined,
   placeholder: 'dark' | 'light' = 'dark'
 ): ResolvedCollectible {
-  const cleaned = (hashHex || '').trim()
-  const hex = (cleaned.startsWith('0x') || cleaned.startsWith('0X') ? cleaned.slice(2) : cleaned).toLowerCase()
+  const hex = normalizeHash(hashHex || '')
   const valid = /^[0-9a-f]{64}$/.test(hex)
   const rarity: Rarity = valid && uint16At(hex, 0) < RARE_THRESHOLD ? 'rare' : 'common'
   // Deterministic glow from hash bytes 4-6, lifted into a soft range so
@@ -325,7 +330,10 @@ export function chainCollectible(
   const glow = valid
     ? [4, 5, 6].map((i) => 90 + (parseInt(hex.slice(i * 2, i * 2 + 2), 16) % 128)).join(' ')
     : '138 132 168'
-  const code = valid ? `${hex.slice(0, 4)}·${hex.slice(-4)}`.toUpperCase() : 'UNKNOWN'
+  // Same serial the tile badge shows (lib/hash shortCode) — including the
+  // non-hex passthrough for hashless items — so an item's fallback name
+  // always matches its own badge.
+  const code = hex ? shortCode(hex) : 'UNKNOWN'
   return {
     url: url ?? (placeholder === 'light' ? PLACEHOLDER_ART_LIGHT : PLACEHOLDER_ART),
     filename: '',
@@ -335,7 +343,8 @@ export function chainCollectible(
     collectionSize: 0,
     rarity,
     isRare: rarity === 'rare',
-    glow
+    glow,
+    hasArt: Boolean(url)
   }
 }
 

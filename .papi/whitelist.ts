@@ -13,13 +13,15 @@ import type {
 export const whitelist: (GamingnetAssetHubWhitelistEntry | GamingnetPeopleWhitelistEntry)[] = [
   // Asset Hub: owned items + three-level metadata (pallets/scarcity.ts)
   'query.Scarcity.NftsByOwner',
-  'query.Scarcity.Instances',
   'query.Scarcity.InstanceMetadata',
   'query.Scarcity.ItemMetadata',
   'query.Scarcity.CollectionMetadata',
   // Asset Hub: claim state (pallets/claims.ts)
   'query.NftClaims.CreditTrees',
   'query.NftClaims.ClaimedCredits',
+  // Asset Hub: Phase-2 staging, no reader yet — the claim flow's
+  // collection picker needs the registered collections and their item
+  // counts (kept whitelisted so the descriptors are ready).
   'query.NftClaims.CollectionMinters',
   'query.Scarcity.Collections',
   // People Chain: earned credits + proofs (pallets/credits.ts)

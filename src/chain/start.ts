@@ -39,6 +39,9 @@ import { devPurseAddress, devRootPathOf } from './derive'
 import { isEmbedded } from '../bridge/embed'
 import { deliverCollection } from '../bridge/collection'
 import { sendFlowEvent } from '../bridge/send'
+import { normalizeHash } from '../lib/hash'
+import { readJson, writeJson } from '../lib/storage'
+import { findMock } from '../devMocks'
 import type { OwnedNft } from '../bridge/types'
 
 // How often to re-read once healthy. Polling both chains together keeps
@@ -73,10 +76,10 @@ function mergeShelf(
   credits: Credit[],
   claimStates: Map<string, ClaimState>
 ): OwnedNft[] {
-  const mintedKeys = new Set(owned.map((o) => o.hash.replace(/^0x/i, '').toLowerCase()))
+  const mintedKeys = new Set(owned.map((o) => normalizeHash(o.hash)))
   const earned: OwnedNft[] = []
   for (const credit of credits) {
-    const key = credit.hash.replace(/^0x/i, '').toLowerCase()
+    const key = normalizeHash(credit.hash)
     if (mintedKeys.has(key)) continue
     const state = claimStates.get(credit.hash) ?? 'earned'
     if (state === 'claimed') continue
@@ -103,48 +106,44 @@ const SCAN_MAX = 1_000
 const SCAN_CACHE_PREFIX = 'pkt_purse_scan_v1:'
 
 function loadScanCache(rootPath: string): number[] {
-  try {
-    const raw = localStorage.getItem(SCAN_CACHE_PREFIX + rootPath)
-    const v = raw ? (JSON.parse(raw) as unknown) : []
-    return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n >= 0 && n < SCAN_MAX) : []
-  } catch {
-    return []
-  }
+  const v = readJson<unknown>(SCAN_CACHE_PREFIX + rootPath)
+  return Array.isArray(v) ? v.filter((n) => Number.isInteger(n) && n >= 0 && n < SCAN_MAX) : []
 }
 function saveScanCache(rootPath: string, occupied: number[]): void {
-  try { localStorage.setItem(SCAN_CACHE_PREFIX + rootPath, JSON.stringify(occupied)) } catch { /* ignore */ }
+  writeJson(SCAN_CACHE_PREFIX + rootPath, occupied)
 }
 
-/** The owned items of a dev root's purse subtree. One batched read per
- *  SCAN_BATCH purses; a fully-empty batch ends the walk. Previously seen
- *  occupied indexes beyond the stop point are re-checked so a hole left
- *  by transfers cannot hide items behind it (on this device, at least —
- *  the real convention is dependency #5's to settle). */
+/** The owned items of a dev root's purse subtree. Gap-limit: the window
+ *  always extends SCAN_BATCH indexes past the last occupied purse, so the
+ *  walk ends once a full trailing batch is empty. The cache remembers the
+ *  occupied layout, letting a steady-state poll cover it all in ONE
+ *  batched read (a first visit, or growth past the window, pays one
+ *  extra round per SCAN_BATCH extension). Scanning always starts at 0 —
+ *  claims mint into the FIRST free purse, so low indexes are exactly
+ *  where new items appear. */
 async function scanDerivedOwned(assetHub: AssetHubApi, rootPath: string): Promise<OwnedNft[]> {
   const owned: OwnedNft[] = []
   const occupied: number[] = []
-  let start = 0
-  for (;;) {
-    const indexes = Array.from({ length: SCAN_BATCH }, (_, k) => start + k)
+  const probe = async (indexes: number[]): Promise<void> => {
     const reads = await fetchOwnedAt(assetHub, indexes.map((i) => devPurseAddress(rootPath, i)))
     reads.forEach((r, k) => {
       if (!r.occupied) return
       occupied.push(indexes[k])
       if (r.item) owned.push(r.item)
     })
-    if (!reads.some((r) => r.occupied)) break
-    start += SCAN_BATCH
-    if (start >= SCAN_MAX) break
   }
-  const lastScanned = start + SCAN_BATCH - 1
-  const remembered = loadScanCache(rootPath).filter((i) => i > lastScanned)
-  if (remembered.length > 0) {
-    const reads = await fetchOwnedAt(assetHub, remembered.map((i) => devPurseAddress(rootPath, i)))
-    reads.forEach((r, k) => {
-      if (!r.occupied) return
-      occupied.push(remembered[k])
-      if (r.item) owned.push(r.item)
-    })
+
+  const remembered = loadScanCache(rootPath)
+  const known = remembered.length > 0 ? Math.max(...remembered) : -1
+  // First window: everything the cache knows plus one empty-batch margin.
+  let limit = Math.min(Math.max(SCAN_BATCH, known + 1 + SCAN_BATCH), SCAN_MAX)
+  let start = 0
+  for (;;) {
+    await probe(Array.from({ length: limit - start }, (_, k) => start + k))
+    const tailStart = limit - SCAN_BATCH
+    if (limit >= SCAN_MAX || !occupied.some((i) => i >= tailStart)) break
+    start = limit
+    limit = Math.min(limit + SCAN_BATCH, SCAN_MAX)
   }
   saveScanCache(rootPath, occupied)
   return owned
@@ -173,7 +172,11 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export function startChainSync(): void {
   if (running) return
-  if (new URLSearchParams(window.location.search).get('mock')) return
+  // Inert only when a mock will actually load (App.tsx resolves through
+  // the same findMock) — a mistyped ?mock= name falls through to the
+  // live shelf instead of silently disabling both data sources.
+  const mockParam = new URLSearchParams(window.location.search).get('mock')
+  if (mockParam && findMock(mockParam)) return
   if (!getAssetHubApi()) return
   running = true
 
@@ -193,17 +196,22 @@ export function startChainSync(): void {
     try {
       const { owned, credits, claimStates } = await withDeadline(
         (async () => {
-          // Explicit purse lists (native, ?address=) win; otherwise the
-          // identity's dev root is gap-scanned for its purses.
+          // Explicit purse lists (native setAccounts) win; otherwise the
+          // identity's dev root is gap-scanned for its purses. Claim
+          // states depend only on the credits, so that leg chains behind
+          // the People read and overlaps the owned scan.
           const derivedRoot = addresses.length === 0 ? derivedRootOf(identity) : null
-          const [owned, credits] = await Promise.all([
+          const [owned, creditState] = await Promise.all([
             derivedRoot !== null
               ? scanDerivedOwned(assetHub, derivedRoot)
               : fetchOwned(assetHub, addresses),
-            people && identity ? fetchCredits(people, identity) : Promise.resolve([])
+            (async () => {
+              const credits = people && identity ? await fetchCredits(people, identity) : []
+              const claimStates = await fetchClaimStates(assetHub, credits)
+              return { credits, claimStates }
+            })()
           ])
-          const claimStates = await fetchClaimStates(assetHub, credits)
-          return { owned, credits, claimStates }
+          return { owned, ...creditState }
         })(),
         POLL_TIMEOUT_MS
       )

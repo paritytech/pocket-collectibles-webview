@@ -77,6 +77,15 @@ export interface DevMock {
   build: () => CollectionInput
 }
 
+/** The mock a `?mock=<name>` value selects (prefix match on the label),
+ *  or undefined for a name that matches nothing. THE resolution rule —
+ *  App.tsx loads via it, and chain/start.ts goes inert only when it
+ *  actually resolves, so a mistyped name degrades to the live chain
+ *  shelf instead of disabling both data sources. */
+export function findMock(param: string): DevMock | undefined {
+  return DEV_MOCKS.find((m) => m.label.toLowerCase().startsWith(param.toLowerCase()))
+}
+
 // Realistic People Chain handles — lowercase, with a numeric suffix, ~11
 // chars. Most usernames cluster around this length, so the header is tuned
 // to display them comfortably.

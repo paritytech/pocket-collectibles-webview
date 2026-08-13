@@ -15,7 +15,10 @@
 // mounts without anything being dropped.
 
 import type { CollectionInput, OwnedNft } from './types'
-import { loadCachedCollection, saveCachedCollection } from './collectionCache'
+import { normalizeHash } from '../lib/hash'
+import { loadCachedCollection, saveCachedCollection, shelfScope } from './collectionCache'
+import { getIdentitySource } from '../chain/identity'
+import { getAccountSource } from '../chain/accounts'
 
 type Listener = (items: OwnedNft[]) => void
 
@@ -42,11 +45,20 @@ let displayName: string | undefined
 // "native hasn't spoken yet" — both present as a zero-length snapshot.
 let delivered = false
 // Bumped only when a *wholesale* setCollection changes the SET OF ITEMS
-// (compared via signatureOf). The UI keys the gallery off this, so a new
+// (compared via keySetOf). The UI keys the gallery off this, so a new
 // collection replays the entrance while a same-content refresh OR an
 // incremental pushNft does not remount.
 let generation = 0
-let lastSignature = ''
+let lastKeySet = ''
+// Full-content signature of the last notified snapshot: a delivery that
+// changes nothing (the chain sync's 30s re-poll) is dropped before it
+// costs a notify, a React render, and a localStorage write.
+let lastContentSig = ''
+// Whose shelf the store's content belongs to — shelfScope() captured at
+// the moment of delivery. The cache write runs in a deferred microtask,
+// by which time the identity seams may already describe another player;
+// saving must use this captured value, never a fresh read.
+let deliveredScope: string | null = null
 // Items dropped by the MAX_OWNED cap in the most recent delivery (telemetry).
 let droppedCount = 0
 
@@ -61,10 +73,8 @@ const queueMicro: (cb: () => void) => void =
  *  content so empty strings can't occupy a slot. */
 function normalizeKey(hash: unknown): string | null {
   if (typeof hash !== 'string') return null
-  let h = hash.trim()
-  if (!h) return null
-  if (h.startsWith('0x') || h.startsWith('0X')) h = h.slice(2)
-  return h.toLowerCase()
+  const h = normalizeHash(hash)
+  return h || null
 }
 
 /** Coerce a possibly-mistyped flag to boolean. Accepts true / 1 / "1" /
@@ -99,10 +109,13 @@ function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
   if (mintedAt !== undefined) item.mintedAt = mintedAt
   if (truthyFlag(obj.pending)) item.pending = true
   if (truthyFlag(obj.claimable)) item.claimable = true
-  // On-chain display metadata from the chain-read path. Same sanitation
-  // as displayName; the image URL must be http(s) (never javascript: etc).
+  // On-chain display metadata from the chain-read path. Item names get
+  // their own, longer limit — sanitizeDisplayName's 24 graphemes were
+  // sized for a player name and truncated real item names ("Sword &
+  // Board of the Ancients"). The image URL must be http(s) (never
+  // javascript: etc).
   if (typeof obj.name === 'string') {
-    const name = sanitizeDisplayName(obj.name)
+    const name = sanitizeItemName(obj.name)
     if (name) item.name = name
   }
   if (typeof obj.imageUrl === 'string' && /^https?:\/\//i.test(obj.imageUrl.trim())) {
@@ -115,8 +128,11 @@ function notify(): void {
   const snapshot = snapshotItems()
   // Piggyback the last-known-good cache write on the coalesced notify, so a
   // pushNft burst costs one localStorage write, not one per item. Only after
-  // a real native delivery — never write the cache-seeded data back to itself.
-  if (delivered) saveCachedCollection(snapshot, displayName)
+  // a real native delivery — never write the cache-seeded data back to itself
+  // — and always under the scope captured when that delivery arrived.
+  if (delivered && deliveredScope !== null) {
+    saveCachedCollection(snapshot, deliveredScope, displayName)
+  }
   for (const cb of listeners) {
     try { cb(snapshot) } catch { /* a listener throwing can't break the channel */ }
   }
@@ -132,9 +148,21 @@ function scheduleNotify(): void {
   queueMicro(() => { notifyScheduled = false; notify() })
 }
 
-/** Stable signature of the current key set, so setCollection can tell a real
- *  change from a same-content refresh (and only then remount the gallery). */
+/** Stable signature of the current CONTENT (keys + display fields), so
+ *  setCollection can tell a real change from a same-content refresh. Two
+ *  uses, one string: an unchanged signature skips notify/save entirely
+ *  (the chain re-polls every 30s — identical data must cost nothing), and
+ *  only a changed KEY SET remounts the gallery (metadata edits re-render
+ *  in place; see deliverCollection). */
 function signatureOf(): string {
+  return Array.from(store.values())
+    .map((o) => [o.hash, o.name ?? '', o.imageUrl ?? '', o.pending ? 'p' : '', o.claimable ? 'c' : '', o.mintedAt ?? ''].join('~'))
+    .sort()
+    .join(',') + `|${displayName ?? ''}`
+}
+
+/** The key set alone — drives the generation bump (gallery remount). */
+function keySetOf(): string {
   return Array.from(store.keys()).sort().join(',')
 }
 
@@ -178,14 +206,30 @@ function sanitizeDisplayName(v: string): string | undefined {
   return Array.from(cleaned).slice(0, 24).join('') || undefined
 }
 
+/** Item names come from chain metadata (values bounded at 256 bytes by the
+ *  runtime) and legitimately contain & and ' — only strip the HTML-bracket
+ *  chars and cap at a display-sane 64 graphemes. */
+function sanitizeItemName(v: string): string | undefined {
+  const cleaned = v.trim().replace(/[<>"]/g, '')
+  return Array.from(cleaned).slice(0, 64).join('') || undefined
+}
+
 /** Wholesale collection delivery — the single ingest point shared by
  *  native's window.setCollection and the chain sync (src/chain/start.ts).
- *  Bumps the generation only when the item SET changed, so a same-content
- *  refresh (e.g. a chain re-poll) never remounts the gallery. */
+ *  Bumps the generation only when the item SET changed (so a same-content
+ *  refresh never remounts the gallery), and skips the notify/save
+ *  entirely when nothing at all changed — except for the very first
+ *  delivery, which must always notify so the UI can leave its boot state
+ *  (App reads hasDelivered() inside the subscription callback). */
 export function deliverCollection(input: CollectionInput): void {
+  const wasDelivered = delivered
   if (!ingestCollection(input)) return
+  deliveredScope = shelfScope()
+  const keys = keySetOf()
+  if (keys !== lastKeySet) { lastKeySet = keys; generation++ }
   const sig = signatureOf()
-  if (sig !== lastSignature) { lastSignature = sig; generation++ }
+  if (sig === lastContentSig && wasDelivered) return
+  lastContentSig = sig
   scheduleNotify()
 }
 
@@ -203,6 +247,7 @@ export function deliverCollection(input: CollectionInput): void {
     return
   }
   delivered = true
+  deliveredScope = shelfScope()
   store.set(coerced.key, coerced.item)
   scheduleNotify()
 }
@@ -212,7 +257,8 @@ export function deliverCollection(input: CollectionInput): void {
   try {
     const raw = (window as unknown as Record<string, unknown>).__COLLECTION__
     if (raw && typeof raw === 'object' && ingestCollection(raw)) {
-      lastSignature = signatureOf()
+      lastKeySet = keySetOf()
+      lastContentSig = signatureOf()
     }
   } catch { /* ignore */ }
 })()
@@ -221,14 +267,21 @@ export function deliverCollection(input: CollectionInput): void {
 // collection so an offline / slow boot renders the user's collection instead
 // of a spinner and then the empty state. Deliberately does NOT set
 // `delivered` — the boot is still waiting on native. A live setCollection
-// replaces this wholesale; seeding lastSignature means a same-content
-// delivery won't bump the generation (no pointless gallery remount). A
+// replaces this wholesale; seeding lastKeySet means a same-content
+// delivery won't bump the generation (no pointless gallery remount) —
+// though the FIRST delivery always notifies, so hasDelivered() reaches
+// the UI even when its content matches the seed. A
 // pushNft stream merges on top, which is safe because the owned set only
 // ever grows (mints are neither transferable nor burnable).
-;(function seedFromCache(): void {
-  if (delivered) return
+//
+// The cache is scope-keyed, and the scope inputs may legitimately arrive
+// AFTER module load (a host calls setPlayerIdentity/setAccounts once the
+// page is up) — so a failed seed stays armed and retries when the seams
+// deliver, until something seeds or real data arrives.
+function trySeedFromCache(): boolean {
+  if (delivered || store.size > 0) return true
   const cached = loadCachedCollection()
-  if (!cached) return
+  if (!cached) return false
   for (const raw of cached.owned) {
     const coerced = coerceItem(raw)
     if (!coerced) continue
@@ -238,7 +291,25 @@ export function deliverCollection(input: CollectionInput): void {
   if (typeof cached.displayName === 'string') {
     displayName = sanitizeDisplayName(cached.displayName)
   }
-  lastSignature = signatureOf()
+  lastKeySet = keySetOf()
+  // A late seed lands after React subscribed — push it out. (At module
+  // load this fans out to zero listeners; `delivered` is still false so
+  // nothing is written back to the cache.)
+  scheduleNotify()
+  return true
+}
+
+;(function seedFromCacheWithRetry(): void {
+  if (trySeedFromCache()) return
+  const disarm: Array<() => void> = []
+  const retry = (): void => {
+    if (trySeedFromCache()) {
+      for (const off of disarm) off()
+      disarm.length = 0
+    }
+  }
+  disarm.push(getIdentitySource().subscribe(retry))
+  disarm.push(getAccountSource().subscribe(retry))
 })()
 
 /** Snapshot of the collection captured at module load (before React
@@ -293,6 +364,8 @@ export function resetCollection(): void {
   displayName = undefined
   delivered = false
   generation = 0
-  lastSignature = ''
+  lastKeySet = ''
+  lastContentSig = ''
+  deliveredScope = null
   droppedCount = 0
 }

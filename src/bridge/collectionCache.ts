@@ -22,8 +22,11 @@ const KEY = 'pkt_collection_cache_v1'
  *  explicit address list, canonicalized. A cached snapshot is only valid
  *  for the inputs that produced it — seeding another player's shelf and
  *  waiting for the poll to correct it reads as "the player param does
- *  nothing" (and in a host would briefly show someone else's collection). */
-function shelfScope(): string {
+ *  nothing" (and in a host would briefly show someone else's collection).
+ *  Callers snapshot this AT DELIVERY TIME (bridge/collection.ts) — never
+ *  at cache-write time, which is microtask-deferred and could already
+ *  belong to a different player. */
+export function shelfScope(): string {
   const id = currentIdentity()
   const idPart = id ? (id.kind === 'account' ? `a:${id.address}` : `p:${id.alias}`) : ''
   return `${idPart}|${currentAddresses().slice().sort().join(',')}`
@@ -71,14 +74,15 @@ export function loadCachedCollection(): CachePayload | null {
 }
 
 /** Persist the current collection as the boot fallback for the next session,
- *  stamped with the inputs it was delivered under. Reads the seams at save
- *  time, which equal the delivery's inputs: the chain sync discards stale
- *  polls on input change (start.ts generation check), and a native delivery
- *  describes whatever identity the host has currently set. */
-export function saveCachedCollection(owned: OwnedNft[], displayName?: string): void {
+ *  stamped with `scope` — the shelfScope() the CALLER captured when the
+ *  delivery arrived. The write itself runs in a coalesced microtask, by
+ *  which time the seams may already describe a different player; stamping
+ *  at write time would file the old player's items under the new player's
+ *  name and defeat the scope check. */
+export function saveCachedCollection(owned: OwnedNft[], scope: string, displayName?: string): void {
   if (isMockSession) return
   try {
-    const payload: CachePayload = { owned, scope: shelfScope(), savedAt: Date.now() }
+    const payload: CachePayload = { owned, scope, savedAt: Date.now() }
     if (displayName) payload.displayName = displayName
     window.localStorage.setItem(KEY, JSON.stringify(payload))
   } catch {

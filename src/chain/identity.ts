@@ -28,8 +28,10 @@
  * (buffer-or-deliver: registered at module load). Pass null to clear.
 */
 
-import { getSs58AddressInfo } from 'polkadot-api'
 import { isEmbedded } from '../bridge/embed'
+import { createObservable } from '../lib/observable'
+import { readJson, writeJson, removeKey } from '../lib/storage'
+import { isValidSs58 } from './ss58'
 import { devAddressOf } from './derive'
 
 export type PlayerIdentity =
@@ -47,8 +49,7 @@ export type PlayerIdentity =
 */
 const STORAGE_KEY = 'pkt_dev_player_v1'
 
-let identity: PlayerIdentity | null = null
-const listeners = new Set<(identity: PlayerIdentity | null) => void>()
+const identity = createObservable<PlayerIdentity | null>(null)
 
 function parseIdentity(raw: unknown): PlayerIdentity | null {
   if (!raw || typeof raw !== 'object') return null
@@ -57,9 +58,7 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
     // Dev names (bob, alice, …) expand to their DEV_PHRASE addresses —
     // a dev affordance, never inside a host, real addresses pass through.
     const address = (!isEmbedded && devAddressOf(o.account)) || o.account.trim()
-    let valid = false
-    try { valid = getSs58AddressInfo(address).isValid } catch { /* not SS58 */ }
-    if (valid) return { kind: 'account', address }
+    if (isValidSs58(address)) return { kind: 'account', address }
     console.warn('[chain] dropping invalid player account (need SS58 or a dev name)', address)
     return null
   }
@@ -73,32 +72,23 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
 }
 
 function persist(id: PlayerIdentity | null): void {
-  try {
-    if (id) localStorage.setItem(STORAGE_KEY, JSON.stringify(id))
-    else localStorage.removeItem(STORAGE_KEY)
-  } catch { /* storage unavailable */ }
+  if (id) writeJson(STORAGE_KEY, id)
+  else removeKey(STORAGE_KEY)
 }
 
 function loadPersisted(): PlayerIdentity | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const o = JSON.parse(raw) as PlayerIdentity
-    // Re-validate through the same gate as fresh input.
-    return o.kind === 'account'
-      ? parseIdentity({ account: o.address })
-      : parseIdentity({ alias: o.alias })
-  } catch {
-    return null
-  }
+  const o = readJson<PlayerIdentity>(STORAGE_KEY)
+  if (!o) return null
+  // Re-validate through the same gate as fresh input.
+  return o.kind === 'account'
+    ? parseIdentity({ account: o.address })
+    : parseIdentity({ alias: o.alias })
 }
 
 function set(raw: unknown, opts: { persist: boolean }): void {
-  identity = parseIdentity(raw)
-  if (opts.persist) persist(identity)
-  for (const cb of listeners) {
-    try { cb(identity) } catch { /* a listener throwing can't break the channel */ }
-  }
+  const next = parseIdentity(raw)
+  if (opts.persist) persist(next)
+  identity.set(next)
 }
 
 // ---- Globals registered at module load ----------------------------------
@@ -139,14 +129,14 @@ function set(raw: unknown, opts: { persist: boolean }): void {
       set(initial, { persist: false })
       return
     }
-    identity = loadPersisted()
+    identity.set(loadPersisted())
   } catch { /* ignore */ }
 })()
 
 /** The identity as of right now — for consumers that need a synchronous
  *  read (e.g. scoping the collection cache) rather than a subscription. */
 export function currentIdentity(): PlayerIdentity | null {
-  return identity
+  return identity.get()
 }
 
 export interface IdentitySource {
@@ -156,11 +146,5 @@ export interface IdentitySource {
 }
 
 export function getIdentitySource(): IdentitySource {
-  return {
-    subscribe(cb) {
-      listeners.add(cb)
-      try { cb(identity) } catch { /* see set() */ }
-      return () => { listeners.delete(cb) }
-    }
-  }
+  return { subscribe: identity.subscribe }
 }

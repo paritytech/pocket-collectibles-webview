@@ -2,7 +2,10 @@
 // renders, plus hash/date formatting and sorting.
 
 import type { OwnedNft } from '../bridge/types'
+import { normalizeHash, shortCode } from '../lib/hash'
 import { chainCollectible, type ResolvedCollectible } from './resolver'
+
+export { shortCode }
 
 /** A fully-resolved collectible ready for the UI. Each owned hash is unique,
  *  but distinct hashes often resolve to the SAME art — the gallery collapses
@@ -26,26 +29,11 @@ export interface CollectibleEntry {
   count?: number
 }
 
-function strip0x(hash: string): string {
-  return hash.startsWith('0x') || hash.startsWith('0X') ? hash.slice(2) : hash
-}
-
 /** Truncated hash for inline display: "a3f1c0…9c2b". */
 export function shortHash(hash: string): string {
-  const h = strip0x(hash)
+  const h = normalizeHash(hash)
   if (h.length <= 12) return h
   return `${h.slice(0, 6)}…${h.slice(-4)}`
-}
-
-/** Compact, distinctive code for a tile badge: two 4-char groups from the
- *  head + tail of the hash, uppercased. Stable per hash, reads like a
- *  serial number ("7F3A·9C2B"). Synthetic identities (hashless
- *  pallet-claimed items keyed "instance-<id>") pass through whole. */
-export function shortCode(hash: string): string {
-  const h = strip0x(hash).toUpperCase()
-  if (!/^[0-9A-F]+$/.test(h)) return h
-  if (h.length < 8) return h
-  return `${h.slice(0, 4)}·${h.slice(-4)}`
 }
 
 const DATE_FMT = new Intl.DateTimeFormat(undefined, {
@@ -85,7 +73,7 @@ export function formatRelative(mintedAt: number | undefined, now: number = Date.
  *  shows a serial-code name and a placeholder tile. The old baked
  *  catalogue (cid_map) is no longer consulted. */
 export function buildEntry(nft: OwnedNft): CollectibleEntry {
-  const hash = strip0x(nft.hash).toLowerCase()
+  const hash = normalizeHash(nft.hash)
   const hashHex = `0x${hash}`
   // Unclaimed tiles render on a white frame, so they get the light
   // placeholder when there's no artwork yet.
@@ -113,12 +101,18 @@ export function buildEntries(nfts: OwnedNft[]): CollectibleEntry[] {
  *  representative carrying a `count`. The representative is the
  *  most-recently-minted member, so "Newest" sort reflects the latest copy.
  *  Pending entries never collapse — each is a distinct credit and renders as
- *  its own tile, even when they share (placeholder) art. Input is not mutated.
+ *  its own tile, even when they share (placeholder) art. Owned entries only
+ *  collapse on REAL artwork: items showing the shared placeholder are
+ *  distinct collectibles that merely lack art, so they key by hash — else
+ *  two different items would fold into one "×2" tile and one would vanish.
+ *  Input is not mutated.
  *  Insertion order of first-seen keys is preserved (sortEntries reorders). */
 export function collapseDuplicates(entries: CollectibleEntry[]): CollectibleEntry[] {
   const groups = new Map<string, { rep: CollectibleEntry; count: number }>()
   for (const e of entries) {
-    const key = e.pending ? `p|${e.hash}` : `o|${e.resolved.url}`
+    const key = e.pending ? `p|${e.hash}`
+      : e.resolved.hasArt === false ? `o|${e.hash}`
+      : `o|${e.resolved.url}`
     const g = groups.get(key)
     if (!g) { groups.set(key, { rep: e, count: 1 }); continue }
     g.count += 1

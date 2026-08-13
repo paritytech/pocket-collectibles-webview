@@ -7,7 +7,8 @@
 *
 * Which accounts collectibles land at, and what host call returns the
 * list a product may see. Until then this module is an injectable seam
-* (sources 1-3 below) with the dev-only deriver as fallback.
+* (__ACCOUNTS__ / setAccounts below) with the identity-driven purse scan
+* as the fallback.
 *
 */
 //
@@ -19,20 +20,20 @@
 // loop.
 //
 // Resolution order at load:
-//   1. ?address=<ss58>[,<ss58>...] query param — dev/QA; persisted so a
-//      plain reload keeps showing the same shelf
-//   2. window.__ACCOUNTS__ set before our JS ran — the future production
+//   1. window.__ACCOUNTS__ set before our JS ran — the future production
 //      seam, same discipline as __COLLECTION__
-//   3. addresses persisted by a previous session
-//   4. nothing — the sync loop (start.ts) then gap-scans the purse
-//      subtree of the dev root the player identity maps to. Dev-only
-//      until a host supplies public keys; an explicit source (1–3, or a
-//      later setAccounts) always wins over it.
+//   2. nothing — the sync loop (start.ts) then gap-scans the purse
+//      subtree of the dev root the player identity maps to (?player=
+//      names/addresses cover the dev/QA need; an explicit list always
+//      wins over the scan).
 // At any later point native may call window.setAccounts([...]) to replace
 // the list (buffer-or-deliver: registered at module load).
+// (A ?address= query param + localStorage persistence existed here until
+// 2026-08-12; removed — unused for testing, and its persisted leftovers
+// silently shadowed the ?player= purse scan across sessions.)
 
-import { getSs58AddressInfo } from 'polkadot-api'
-import { deriveAddresses, devKeyAtIndex } from './derive'
+import { createObservable } from '../lib/observable'
+import { isValidSs58 } from './ss58'
 
 export interface AccountSource {
   /** Calls cb with the current address list immediately, then again on
@@ -40,10 +41,7 @@ export interface AccountSource {
   subscribe(cb: (addresses: string[]) => void): () => void
 }
 
-const STORAGE_KEY = 'pkt_dev_addresses_v1'
-
-let addresses: string[] = []
-const listeners = new Set<(addresses: string[]) => void>()
+const addresses = createObservable<string[]>([])
 
 /** Keep only valid, deduplicated SS58 addresses; drop the rest loudly. */
 function sanitize(list: unknown): string[] {
@@ -53,9 +51,7 @@ function sanitize(list: unknown): string[] {
     if (typeof raw !== 'string') continue
     const addr = raw.trim()
     if (!addr) continue
-    let valid = false
-    try { valid = getSs58AddressInfo(addr).isValid } catch { /* not SS58 */ }
-    if (!valid) {
+    if (!isValidSs58(addr)) {
       console.warn('[chain] dropping invalid SS58 address', addr)
       continue
     }
@@ -64,69 +60,21 @@ function sanitize(list: unknown): string[] {
   return out
 }
 
-function persist(list: string[]): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)) } catch { /* storage unavailable */ }
-}
-
-function loadPersisted(): string[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? sanitize(JSON.parse(raw)) : []
-  } catch {
-    return []
-  }
-}
-
-function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): void {
-  addresses = sanitize(list)
-  if (opts.persist) persist(addresses)
-  for (const cb of listeners) {
-    try { cb(addresses) } catch { /* a listener throwing can't break the channel */ }
-  }
+function set(list: unknown): void {
+  addresses.set(sanitize(list))
 }
 
 // ---- Globals registered at module load ----------------------------------
 
 ;(window as unknown as Record<string, unknown>).setAccounts = (list: string[]) => {
-  set(list, { persist: false })
+  set(list)
 }
 
 ;(function takeInitial(): void {
   try {
-    const params = new URLSearchParams(window.location.search)
-    // An explicit ?player=/?alias= (without ?address=) means "show me this
-    // identity's shelf": a persisted address list from an earlier ?address=
-    // session would shadow the identity's purse scan forever, so drop it.
-    // Both are dev affordances — the current URL outranks old leftovers.
-    if (!params.get('address') && (params.get('player') || params.get('alias'))) {
-      try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
-    }
-    // ?derive=1 forces the deriver and clears any stale persisted list
-    // (a previous ?address= session would otherwise shadow it forever).
-    if (params.get('derive') === '1') {
-      try { localStorage.removeItem(STORAGE_KEY) } catch { /* ignore */ }
-      window.setTimeout(() => {
-        try {
-          set(deriveAddresses(devKeyAtIndex()), { persist: false, explicit: false })
-        } catch (err) {
-          console.warn('[chain] account derivation failed', err)
-        }
-      }, 0)
-      return
-    }
-    const param = params.get('address')
-    if (param) {
-      set(param.split(','), { persist: true })
-      return
-    }
     const initial = (window as unknown as Record<string, unknown>).__ACCOUNTS__
     if (Array.isArray(initial)) {
-      set(initial, { persist: false })
-      return
-    }
-    const persisted = loadPersisted()
-    if (persisted.length > 0) {
-      addresses = persisted
+      set(initial)
       return
     }
     // Nothing explicit: leave the list empty. The sync loop then
@@ -139,15 +87,9 @@ function set(list: unknown, opts: { persist: boolean; explicit?: boolean }): voi
 /** The address list as of right now — for consumers that need a synchronous
  *  read (e.g. scoping the collection cache) rather than a subscription. */
 export function currentAddresses(): string[] {
-  return addresses
+  return addresses.get()
 }
 
 export function getAccountSource(): AccountSource {
-  return {
-    subscribe(cb) {
-      listeners.add(cb)
-      try { cb(addresses) } catch { /* see set() */ }
-      return () => { listeners.delete(cb) }
-    }
-  }
+  return { subscribe: addresses.subscribe }
 }

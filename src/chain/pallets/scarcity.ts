@@ -28,26 +28,43 @@ type Nft = NonNullable<
   Awaited<ReturnType<AssetHubApi['query']['Scarcity']['NftsByOwner']['getValue']>>
 >
 
-/** Effective metadata value for `key`, resolved instance -> item ->
- *  collection, first match wins (mirrors the pallet's
- *  `instance_metadata_of`). Metadata keys/values are `Vec<u8>`, which the
- *  typed api serves as bytes. */
-async function metadataOf(
+/** Effective metadata value for `key` across MANY nfts at once, resolved
+ *  instance -> item -> collection, first match wins (mirrors the pallet's
+ *  `instance_metadata_of`). One batched getValues per tier — a constant
+ *  ≤3 round trips regardless of how many items the shelf holds, instead
+ *  of up to 3 point reads per item. Result is positional: out[i] answers
+ *  nfts[i]. Metadata keys/values are `Vec<u8>`, served as bytes. */
+async function batchMetadataOf(
   api: AssetHubApi,
-  nft: Nft,
+  nfts: Nft[],
   key: string
-): Promise<Uint8Array | undefined> {
+): Promise<(Uint8Array | undefined)[]> {
   const keyBytes = Binary.fromText(key)
-  const reads = [
-    () => api.query.Scarcity.InstanceMetadata.getValue(nft.instance, keyBytes, AT),
-    () => api.query.Scarcity.ItemMetadata.getValue(nft.collection, nft.item, keyBytes, AT),
-    () => api.query.Scarcity.CollectionMetadata.getValue(nft.collection, keyBytes, AT)
-  ]
-  for (const read of reads) {
-    const entry = await read()
-    if (entry && entry.value instanceof Uint8Array) return entry.value
+  const out: (Uint8Array | undefined)[] = new Array(nfts.length).fill(undefined)
+  let pending = nfts.map((_, i) => i)
+
+  const take = (entries: ({ value: Uint8Array } | undefined)[]): void => {
+    pending = pending.filter((i, k) => {
+      const entry = entries[k]
+      if (entry && entry.value instanceof Uint8Array) {
+        out[i] = entry.value
+        return false
+      }
+      return true
+    })
   }
-  return undefined
+
+  take(await api.query.Scarcity.InstanceMetadata.getValues(
+    pending.map((i) => [nfts[i].instance, keyBytes] as [bigint, typeof keyBytes]), AT))
+  if (pending.length > 0) {
+    take(await api.query.Scarcity.ItemMetadata.getValues(
+      pending.map((i) => [nfts[i].collection, nfts[i].item, keyBytes] as [number, number, typeof keyBytes]), AT))
+  }
+  if (pending.length > 0) {
+    take(await api.query.Scarcity.CollectionMetadata.getValues(
+      pending.map((i) => [nfts[i].collection, keyBytes] as [number, typeof keyBytes]), AT))
+  }
+  return out
 }
 
 // The identity hash is immutable in practice (it IS the item's identity),
@@ -93,46 +110,54 @@ export interface PurseRead {
 }
 
 /** Positional reads — result[i] answers addresses[i]. The gap-limit purse
- *  scan (chain/start.ts) needs per-index occupancy, not just the items. */
+ *  scan (chain/start.ts) needs per-index occupancy, not just the items.
+ *  All metadata resolves in ≤9 batched round trips total (3 tiers × 3
+ *  keys, keys in parallel), independent of the item count. */
 export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promise<PurseRead[]> {
   if (addresses.length === 0) return []
   const raws = await api.query.Scarcity.NftsByOwner.getValues(
     addresses.map((a) => [a] as [string]),
     AT
   )
-  return Promise.all(
-    raws.map(async (raw): Promise<PurseRead> => {
-      if (raw === undefined || raw === null) return { occupied: false, item: null }
-      const nft = raw as Nft
-      let hash = hashCache.get(nft.instance)
-      const reads = await Promise.all([
-        hash ? Promise.resolve(undefined) : metadataOf(api, nft, HASH_METADATA_KEY),
-        metadataOf(api, nft, NAME_METADATA_KEY),
-        metadataOf(api, nft, IMAGE_METADATA_KEY)
-      ])
-      if (!hash) {
-        const bytes = reads[0]
-        if (bytes) {
-          hash = Binary.toHex(bytes)
-        } else {
-          // No identity hash at any tier — the signature of a
-          // pallet-claimed item (the claim mints with empty metadata,
-          // READ_PATH.md; every tooling mint writes the hash). The item
-          // is real and owned: key it by its instance id — unique,
-          // stable, impossible to confuse with a 32-byte credit hash.
-          hash = `instance-${nft.instance}`
-        }
-        hashCache.set(nft.instance, hash)
-      }
-      const item: OwnedNft = { hash, mintedAt: Number(nft.minted_at) }
-      if (reads[1]) item.name = Binary.toText(reads[1])
-      if (reads[2]) {
-        const url = imageUrlOf(Binary.toText(reads[2]))
-        if (url) item.imageUrl = url
-      }
-      return { occupied: true, item }
-    })
-  )
+  const reads: PurseRead[] = addresses.map(() => ({ occupied: false, item: null }))
+  const present: { pos: number; nft: Nft }[] = []
+  raws.forEach((raw, pos) => {
+    if (raw !== undefined && raw !== null) present.push({ pos, nft: raw as Nft })
+  })
+  if (present.length === 0) return reads
+
+  const nfts = present.map((p) => p.nft)
+  const needHash = present.filter((p) => !hashCache.has(p.nft.instance))
+  const [hashBytes, nameBytes, imageBytes] = await Promise.all([
+    needHash.length > 0
+      ? batchMetadataOf(api, needHash.map((p) => p.nft), HASH_METADATA_KEY)
+      : Promise.resolve<(Uint8Array | undefined)[]>([]),
+    batchMetadataOf(api, nfts, NAME_METADATA_KEY),
+    batchMetadataOf(api, nfts, IMAGE_METADATA_KEY)
+  ])
+  // Only REAL hashes enter the cache: an item minted without the identity
+  // key (every pallet claim — empty metadata, READ_PATH.md) keys as
+  // `instance-<id>` this poll, but stays re-checked so a "hash" written
+  // later (tooling backfill, a future runtime fix) is picked up without
+  // a reload.
+  needHash.forEach((p, k) => {
+    const bytes = hashBytes[k]
+    if (bytes) hashCache.set(p.nft.instance, Binary.toHex(bytes))
+  })
+
+  present.forEach((p, k) => {
+    const hash = hashCache.get(p.nft.instance) ?? `instance-${p.nft.instance}`
+    const item: OwnedNft = { hash, mintedAt: Number(p.nft.minted_at) }
+    const name = nameBytes[k]
+    if (name) item.name = Binary.toText(name)
+    const image = imageBytes[k]
+    if (image) {
+      const url = imageUrlOf(Binary.toText(image))
+      if (url) item.imageUrl = url
+    }
+    reads[p.pos] = { occupied: true, item }
+  })
+  return reads
 }
 
 /** Read the owned set for a list of purse addresses and map it into the

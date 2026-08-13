@@ -17,7 +17,7 @@ import { isEmbedded } from './bridge/embed'
 import { stopChainSync } from './chain/start'
 import type { CollectionInput, OwnedNft } from './bridge/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
-import { DEV_MOCKS } from './devMocks'
+import { DEV_MOCKS, findMock } from './devMocks'
 
 // If native never delivers a collection, stop waiting after this long rather
 // than spinning forever (offline / silent host). What shows then depends on
@@ -100,7 +100,7 @@ export default function App() {
   useEffect(() => {
     const param = new URLSearchParams(window.location.search).get('mock')
     if (!param) return
-    const mock = DEV_MOCKS.find((m) => m.label.toLowerCase().startsWith(param.toLowerCase()))
+    const mock = findMock(param)
     if (!mock) return
     const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
     w.setCollection?.(mock.build())
