@@ -28,7 +28,7 @@ import { isEmbedded, isInContainer } from '../host/embed'
 import { devApis, destroyDevClients } from './devClient'
 // Legacy-embedded hosts (no container) stay socket-free unless an
 // explicit ?player= override asks for the QA sockets.
-import { hasDevOverride } from './identity'
+import { hasDevOverride } from './devIdentity'
 
 export type AssetHubApi = TypedApi<typeof gamingnetAssetHub>
 export type PeopleApi = TypedApi<typeof gamingnetPeople>

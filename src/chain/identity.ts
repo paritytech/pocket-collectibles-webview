@@ -3,8 +3,6 @@
  * This module is the permanent home of an OPEN QUESTION, DEPENDENCY #2/#3
  * (DEPENDENCIES.md): which identity the player queries (and claims) as —
  * game-subtree account or person alias — and where production learns it.
- * The module's PARTS age differently; each temporary piece is marked
- * inline:
  *
  *   PERMANENT — the PlayerIdentity type (mirrors the pallet's
  *   `AccountOrPerson`, chain reality), the validation gate, and the
@@ -14,8 +12,8 @@
  *   scan via purses.ts). Whether the award pipeline credits this account
  *   or a person ALIAS instead is still open (dependency #2/#3) — if it is
  *   the alias, this branch swaps to getProductAccountAlias.
- *   TEMPORARY — the dev inputs feeding the seam outside a container
- *   (see markers).
+ *   TEMPORARY — the dev inputs feeding the seam (devIdentity.ts: the
+ *   ?player=/?alias= QA override, dev-name expansion, persistence).
  *
  * The credit map is keyed by the pallet's `AccountOrPerson`: an
  * ordinary account, or an alias (32-byte person id) for players known
@@ -28,28 +26,21 @@
  *   3. dev — the identity a previous session persisted.
 */
 
-import { isEmbedded, isInContainer } from '../host/embed'
+import { isInContainer } from '../host/embed'
 import { createObservable } from '../lib/observable'
-import { readJson, writeJson, removeKey } from '../lib/storage'
 import { withDeadline } from '../lib/deadline'
 import { isValidSs58 } from './ss58'
-import { devAddressOf } from './derive'
 import { hostPurseSource } from './purses'
+import {
+  takeUrlIdentityOverride,
+  devAccountExpansion,
+  persistDevIdentity,
+  loadPersistedDevIdentity
+} from './devIdentity'
 
 export type PlayerIdentity =
   | { kind: 'account'; address: string }
   | { kind: 'alias'; alias: string } // 0x-prefixed 32-byte hex
-
-/*
-* TEMPORARY SOLUTION TO OPEN QUESTION
-* DEPENDENCY #2/#3
-* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
-*
-* Dev-session persistence, so a reload keeps showing the same shelf.
-* Production resolves identity from its real source every boot instead.
-*
-*/
-const STORAGE_KEY = 'pkt_dev_player_v1'
 
 const identity = createObservable<PlayerIdentity | null>(null)
 
@@ -57,10 +48,7 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   if (typeof o.account === 'string') {
-    // Dev names (bob, alice, …) expand to their DEV_PHRASE addresses.
-    // Inside a host only an explicit ?player= override unlocks this;
-    // real addresses pass through untouched.
-    const address = ((!isEmbedded || devOverride) && devAddressOf(o.account)) || o.account.trim()
+    const address = devAccountExpansion(o.account) || o.account.trim()
     if (isValidSs58(address)) return { kind: 'account', address }
     console.warn('[chain] dropping invalid player account (need SS58 or a dev name)', address)
     return null
@@ -74,13 +62,8 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
   return null
 }
 
-function persist(id: PlayerIdentity | null): void {
-  if (id) writeJson(STORAGE_KEY, id)
-  else removeKey(STORAGE_KEY)
-}
-
 function loadPersisted(): PlayerIdentity | null {
-  const o = readJson<PlayerIdentity>(STORAGE_KEY)
+  const o = loadPersistedDevIdentity()
   if (!o) return null
   // Re-validate through the same gate as fresh input.
   return o.kind === 'account'
@@ -90,21 +73,11 @@ function loadPersisted(): PlayerIdentity | null {
 
 function set(raw: unknown, opts: { persist: boolean }): void {
   const next = parseIdentity(raw)
-  if (opts.persist) persist(next)
+  if (opts.persist) persistDevIdentity(next)
   identity.set(next)
 }
 
 // ---- Resolution, called once from the boot sequence ----------------------
-
-// True when the session's identity came from an explicit URL param — a
-// QA affordance that outranks the container's own resolution and lets
-// the purse scan / connection layer relax their production rules.
-let devOverride = false
-
-/** Whether an explicit ?player=/?alias= override drives this session. */
-export function hasDevOverride(): boolean {
-  return devOverride
-}
 
 /** Resolve who the player is. URL params win everywhere (QA override,
  *  works inside a host too). Otherwise a container asks the host for
@@ -113,31 +86,11 @@ export function hasDevOverride(): boolean {
  *  reports it. Dev falls back to the last persisted identity. Never
  *  rejects. */
 export async function initIdentity(): Promise<void> {
-  try {
-    /*
-    * TEMPORARY SOLUTION TO OPEN QUESTION
-    * DEPENDENCY #2/#3
-    * https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
-    *
-    * QA sessions inject an identity from outside. Whether the container
-    * answer below (product account 0) is also what the award pipeline
-    * credits — or a person alias is — decides how these age.
-    *
-    */
-    const params = new URLSearchParams(window.location.search)
-    const player = params.get('player')
-    if (player) {
-      devOverride = true
-      set({ account: player }, { persist: !isInContainer })
-      return
-    }
-    const alias = params.get('alias')
-    if (alias) {
-      devOverride = true
-      set({ alias }, { persist: !isInContainer })
-      return
-    }
-  } catch { /* ignore */ }
+  const override = takeUrlIdentityOverride()
+  if (override) {
+    set(override, { persist: !isInContainer })
+    return
+  }
   if (isInContainer) {
     try {
       const source = await withDeadline(hostPurseSource(), 10_000, 'host identity')

@@ -79,12 +79,14 @@ sequenceDiagram
 | `chain/client.ts` | where bytes come from: product-sdk container (`createChainClient`, host-served by genesis hash; host without Asset Hub → retried failure + error state, sockets only under a `?player=` QA override) vs dev WS vs inert; teardown/rebuild for wedged connections |
 | `chain/devClient.ts` | the dev connection path: direct testnet WebSockets, one lazy client per chain (`TESTNET_WS`) |
 | `chain/product.ts` | the product's DotNS identifier (value pending team ratification) |
-| `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in); dev impl wraps `derive.ts` |
+| `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in) |
+| `chain/devPurses.ts` | the dev purse source: in-page DEV_PHRASE derivation over `derive.ts` |
 | `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus ONE `ScarcityApi.metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) per poll |
 | `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/derive.ts` | the DEV-ONLY account deriver: `//nft//i` (the retreat web-demo's convention, adopted 2026-08-11 so both in-house minting surfaces share purses) from `DEV_PHRASE` in-page — inside a container, host product accounts replace it (purses.ts) |
-| `chain/identity.ts` | the player-identity seam: container → product account 0 via `initIdentity()`; dev → URL params/persistence |
+| `chain/identity.ts` | the player-identity seam: type, validation gate, subscription; container → product account 0 via `initIdentity()` |
+| `chain/devIdentity.ts` | the dev identity inputs: `?player=`/`?alias=` QA override, dev-name expansion, dev-session persistence |
 | `chain/start.ts` | the loop: inputs → parallel fetch → mergeShelf → deliverCollection; errors → `flow.error phase=chain` + backoff (a host refusing Asset Hub stops the session's sync) |
 | `collection/store.ts` | the single store the chain sync (and dev mocks) feed |
 

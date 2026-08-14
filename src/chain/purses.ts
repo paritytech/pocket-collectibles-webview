@@ -4,11 +4,10 @@
 // address is purse i". In a product-sdk container the HOST derives the
 // key (product accounts under our DotNS name — the page never sees a
 // secret, design doc §3.7, closing dependency #5 for container mode). In
-// dev, the DEV_PHRASE deriver in derive.ts answers as before.
+// dev, the DEV_PHRASE deriver answers as before (devPurses.ts).
 
 import { ss58Address } from '@polkadot-labs/hdkd-helpers'
 import { getAccountsProvider } from '@parity/product-sdk-host'
-import { devPurseAddress } from './derive'
 import { DOTNS_IDENTIFIER } from './product'
 
 export interface PurseSource {
@@ -16,16 +15,6 @@ export interface PurseSource {
   cacheKey: string
   /** SS58 address (prefix 42) of the purse at `index`. */
   addressAt(index: number): Promise<string>
-}
-
-/** Dev source: in-page DEV_PHRASE derivation, '' = the bare dev-player
- *  root, '//Bob' = dev Bob's subtree. cacheKey stays the root path, so
- *  existing scan caches remain valid. */
-export function devPurseSource(rootPath: string): PurseSource {
-  return {
-    cacheKey: rootPath,
-    addressAt: (index) => Promise.resolve(devPurseAddress(rootPath, index))
-  }
 }
 
 /** Container source: purse i is the host-derived product account at
