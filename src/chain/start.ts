@@ -27,14 +27,16 @@
 //     connection may be opened, so the shelf shows cache or boot-timeout
 //   - ?mock= session -> inert (mocks must never mix with chain data)
 
+import { Enum } from 'polkadot-api'
 import { getChainApis, destroyClients, type AssetHubApi } from './client'
 import { setChainSyncStatus } from './status'
-import { fetchOwnedAt } from './pallets/scarcity'
+import { fetchOwnedAt, firstFreePurse, findPurseHolding } from './pallets/scarcity'
 import { fetchCredits, type Credit } from './pallets/credits'
 import { fetchClaimStates, type ClaimState } from './pallets/claims'
 import { getIdentitySource, currentIdentity, type PlayerIdentity } from './identity'
-import { getSigner } from './signing'
+import { getSigner, getPurseSigner } from './signing'
 import { submitClaim, type ClaimParams, type ClaimResult, type ClaimStatus } from './claim'
+import { watchSubmission, type SubmitStatus, type SubmitResult } from './submit'
 import { hasDevOverride } from './devIdentity'
 import { devRootPathOf } from './derive'
 import { hostPurseSource, type PurseSource } from './purses'
@@ -288,6 +290,58 @@ export async function claimCredit(
   if (!signer) return { ok: false, error: 'this session cannot sign a claim' }
   const source = await purseSourceOf(identity)
   const result = await submitClaim(apis, identity, source, params, signer, onStatus)
+  if (result.ok) refreshChainSync()
+  return result
+}
+
+/** What the caller needs to send one owned item: which item (its identity
+ *  hash), and the dev root of the recipient whose subtree it lands in. */
+export interface SendParams {
+  hash: string
+  recipientRoot: string
+}
+
+export type SendStatus = SubmitStatus
+export type SendResult = SubmitResult
+
+/** Send an owned item to another player: locate the purse currently HOLDING
+ *  it (the sending key), sign as that purse (signing.ts — the host inside a
+ *  container, the dev key otherwise, NEVER a fallback), and `Scarcity.transfer`
+ *  it into the recipient's first EMPTY purse (so it lands on their shelf scan).
+ *  On success forces an immediate re-poll so the sent item leaves this shelf.
+ *  Resolves with the outcome; never rejects. */
+export async function sendItem(
+  params: SendParams,
+  onStatus: (status: SendStatus) => void
+): Promise<SendResult> {
+  const identity = currentIdentity()
+  if (!identity) return { ok: false, error: 'no player identity to send from' }
+  const apis = await getChainApis()
+  if (!apis) return { ok: false, error: 'no chain connection this session' }
+  const senderSource = await purseSourceOf(identity)
+  const holding = await findPurseHolding(apis.assetHub, senderSource, params.hash)
+  if (!holding) return { ok: false, error: 'you no longer hold this item' }
+  const signer = await getPurseSigner(identity, holding.index)
+  if (!signer) return { ok: false, error: 'this session cannot sign a transfer' }
+  const dest = await firstFreePurse(apis.assetHub, devPurseSource(params.recipientRoot))
+
+  const tx = apis.assetHub.tx.Scarcity.transfer({ to: dest.address })
+  // A purse key holds an NFT but no balance, so a plain signed transfer is
+  // rejected at validation (Invalid::Payment). `Scarcity.transfer` is instead
+  // authorized by the `AsScarcity` transaction extension, which turns the
+  // signed purse-key origin into the NFT origin (fee-free "rested" path). It
+  // must echo the purse's CURRENT instance + state nonce, or validation fails
+  // (NftStateMismatch); a successful move bumps the nonce, invalidating any
+  // other outstanding authorization. The transfer stays mortal (papi default)
+  // so a stale authorization can't be replayed past its era.
+  const options = {
+    customSignedExtensions: {
+      AsScarcity: {
+        value: Enum('AsNft', { instance: holding.instance, state_nonce: holding.stateNonce })
+      }
+    }
+  }
+  const result = await watchSubmission(tx, signer, onStatus, options)
   if (result.ok) refreshChainSync()
   return result
 }

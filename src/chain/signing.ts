@@ -27,6 +27,7 @@ import { DOTNS_IDENTIFIER } from './product'
 import { hasDevOverride } from './devIdentity'
 import type { PlayerIdentity } from './identity'
 import { devSignerFor } from './devSigning'
+import { devPurseSignerFor, devRootPathOf } from './derive'
 
 /** A signer for the claimant, or null when this session can't sign. */
 export async function getSigner(identity: PlayerIdentity | null): Promise<PolkadotSigner | null> {
@@ -50,4 +51,37 @@ export async function getSigner(identity: PlayerIdentity | null): Promise<Polkad
   // Plain browser, or an explicit QA override: sign in-page with the dev key.
   // Only answers for dev-held identities, null for anything else.
   return devSignerFor(identity)
+}
+
+/** A signer for the player's purse at derivation `index` — the SENDING key of
+ *  a transfer, which `Scarcity.transfer` runs as the purse-key origin, not the
+ *  player root. Same seam and SAME HARD RULE as getSigner: inside a container
+ *  ONLY the host signs (as the product account at that index); it NEVER falls
+ *  back to the dev key. Returns null when this session can't sign the purse
+ *  (an unregistered/absent host capability, or a non-dev identity in the
+ *  browser) so the UI hides the send action rather than dead-ending. */
+export async function getPurseSigner(
+  identity: PlayerIdentity | null,
+  index: number
+): Promise<PolkadotSigner | null> {
+  if (!identity || identity.kind !== 'account') return null
+
+  if (isInContainer && !hasDevOverride()) {
+    const provider = await getAccountsProvider()
+    if (provider) {
+      const account = await provider
+        .getProductAccount(DOTNS_IDENTIFIER, index)
+        .match((a) => a, () => null)
+      if (account) return provider.getProductAccountSigner(account)
+    }
+    // Host can't sign → do NOT fall back to the dev key; hide the action.
+    return null
+  }
+
+  // Plain browser, or an explicit QA override: sign the purse in-page with the
+  // dev key, under the SAME dev root the purse scan walks (purseSourceOf). A
+  // non-dev-derivable identity yields null.
+  const root = devRootPathOf(identity.address)
+  if (root === null) return null
+  return devPurseSignerFor(root, index)
 }

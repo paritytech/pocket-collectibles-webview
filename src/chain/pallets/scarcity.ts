@@ -15,6 +15,8 @@
 import { Binary, Enum } from 'polkadot-api'
 import type { OwnedNft } from '../../collection/types'
 import type { AssetHubApi } from '../client'
+import type { PurseSource } from '../purses'
+import { normalizeHash } from '../../lib/hash'
 
 /** Metadata key convention carrying the 32-byte identity hash. */
 export const HASH_METADATA_KEY = 'hash'
@@ -136,10 +138,14 @@ export function imageUrlOf(value: string): string | undefined {
 
 /** One purse read: whether the address holds an NFT at all, and the
  *  displayable item when it does (an occupied purse whose item lacks the
- *  "hash" identity metadata is occupied with item null). */
+ *  "hash" identity metadata is occupied with item null). `nft` carries the
+ *  raw on-chain identity of an occupied purse — the permanent instance and
+ *  its ownership-state nonce — which a transfer needs to authorize the
+ *  purse-key origin (the `AsScarcity` extension, chain/start.ts). */
 export interface PurseRead {
   occupied: boolean
   item: OwnedNft | null
+  nft?: { instance: bigint; stateNonce: bigint }
 }
 
 /** Positional reads — result[i] answers addresses[i]. The gap-limit purse
@@ -171,8 +177,77 @@ export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promi
     const hash = hashBytes ? Binary.toHex(hashBytes) : `instance-${p.nft.instance}`
     const item: OwnedNft = { hash, mintedAt: Number(p.nft.minted_at) }
     if (found) Object.assign(item, resolveDisplay(found))
-    reads[p.pos] = { occupied: true, item }
+    reads[p.pos] = {
+      occupied: true,
+      item,
+      nft: { instance: p.nft.instance, stateNonce: p.nft.state_nonce }
+    }
   })
   return reads
+}
+
+// ---- purse-index lookups (the write flows) ---------------------------------
+// The mint claim and the send transfer both need a specific purse ADDRESS by
+// its role, not the whole shelf: a claim mints into the first EMPTY purse, a
+// transfer signs as the purse HOLDING a given item and sends into the
+// recipient's first empty purse. Both walk a PurseSource low-index-first, the
+// same layout the shelf scan reads, batching to keep the round trips down.
+
+/** One located purse: its derivation index and SS58 address. */
+export interface PurseLocation {
+  index: number
+  address: string
+}
+
+/** A located purse that HOLDS an item, carrying the raw NFT identity a
+ *  transfer must echo back to authorize the purse-key origin. */
+export interface HeldPurse extends PurseLocation {
+  instance: bigint
+  stateNonce: bigint
+}
+
+// Claims/transfers land low-index-first, so a free (or occupied) key is
+// almost always in the first batch; the ceiling just bounds a pathological
+// walk. Matches start.ts' scan bounds.
+const PURSE_SCAN_BATCH = 10
+const PURSE_SCAN_MAX = 1_000
+
+/** The first EMPTY purse of `source`'s subtree — a mint/transfer target
+ *  (`Scarcity` allows one NFT per key, so a destination must be free). */
+export async function firstFreePurse(api: AssetHubApi, source: PurseSource): Promise<PurseLocation> {
+  for (let start = 0; start < PURSE_SCAN_MAX; start += PURSE_SCAN_BATCH) {
+    const indexes = Array.from({ length: PURSE_SCAN_BATCH }, (_, k) => start + k)
+    const addresses = await Promise.all(indexes.map((i) => source.addressAt(i)))
+    const reads = await fetchOwnedAt(api, addresses)
+    const free = reads.findIndex((r) => !r.occupied)
+    if (free >= 0) return { index: indexes[free], address: addresses[free] }
+  }
+  throw new Error(`no empty purse in the first ${PURSE_SCAN_MAX} indexes`)
+}
+
+/** The purse of `source`'s subtree currently holding the item whose identity
+ *  hash matches `hash` (any 0x/case form), or null when none does — the
+ *  sending key for a transfer. Stops at the first fully-empty batch, exactly
+ *  like the shelf scan, so a normal shelf resolves in one round. */
+export async function findPurseHolding(
+  api: AssetHubApi,
+  source: PurseSource,
+  hash: string
+): Promise<HeldPurse | null> {
+  const target = normalizeHash(hash)
+  for (let start = 0; start < PURSE_SCAN_MAX; start += PURSE_SCAN_BATCH) {
+    const indexes = Array.from({ length: PURSE_SCAN_BATCH }, (_, k) => start + k)
+    const addresses = await Promise.all(indexes.map((i) => source.addressAt(i)))
+    const reads = await fetchOwnedAt(api, addresses)
+    for (let k = 0; k < reads.length; k++) {
+      const { item, nft } = reads[k]
+      if (item && nft && normalizeHash(item.hash) === target) {
+        return { index: indexes[k], address: addresses[k], instance: nft.instance, stateNonce: nft.stateNonce }
+      }
+    }
+    // Nothing occupied in this batch → past the last purse, item isn't here.
+    if (reads.every((r) => !r.occupied)) break
+  }
+  return null
 }
 

@@ -20,7 +20,8 @@ import type { ChainApis } from './client'
 import type { PlayerIdentity } from './identity'
 import type { PurseSource } from './purses'
 import { fetchClaimProof } from './pallets/credits'
-import { fetchOwnedAt } from './pallets/scarcity'
+import { firstFreePurse } from './pallets/scarcity'
+import { watchSubmission, type SubmitStatus, type SubmitResult } from './submit'
 
 /** What the caller needs to spend one credit: which credit, the People-chain
  *  block it was awarded in (names the tree the proof verifies against), and
@@ -32,45 +33,11 @@ export interface ClaimParams {
 }
 
 /** Coarse progress of a submission, for the overlay's status line. */
-export type ClaimStatus = 'signing' | 'inBlock' | 'finalized'
+export type ClaimStatus = SubmitStatus
 
-export interface ClaimResult {
-  ok: boolean
-  /** A human-readable reason when `ok` is false. */
-  error?: string
-}
+export type ClaimResult = SubmitResult
 
-// Purse scan window for finding an empty mint target. Claims mint low-index
-// first, so a free key is almost always in the first batch.
-const FREE_SCAN_BATCH = 10
-const FREE_SCAN_MAX = 1_000
-
-/** The first empty purse address of `source`'s subtree — the mint target. */
-async function firstFreePurse(apis: ChainApis, source: PurseSource): Promise<string> {
-  for (let start = 0; start < FREE_SCAN_MAX; start += FREE_SCAN_BATCH) {
-    const indexes = Array.from({ length: FREE_SCAN_BATCH }, (_, k) => start + k)
-    const addresses = await Promise.all(indexes.map((i) => source.addressAt(i)))
-    const reads = await fetchOwnedAt(apis.assetHub, addresses)
-    const free = reads.findIndex((r) => !r.occupied)
-    if (free >= 0) return addresses[free]
-  }
-  throw new Error('no empty purse in the first 1000 indexes')
-}
-
-/** Read the nested dispatch error into a readable path, e.g.
- *  "Module · NftClaims · AlreadyClaimed". */
-function dispatchErrorText(err: { type: string; value: unknown } | undefined): string {
-  const parts: string[] = []
-  let cur: unknown = err
-  while (cur && typeof cur === 'object' && 'type' in cur && typeof (cur as { type: unknown }).type === 'string') {
-    const node = cur as { type: string; value?: unknown }
-    parts.push(node.type)
-    cur = node.value
-  }
-  return parts.join(' · ') || 'the claim failed on-chain'
-}
-
-/** Build, sign, and watch a claim to finality. Resolves once — never
+/** Build, sign, and watch a claim to inclusion. Resolves once — never
  *  rejects — with `ok` and, on failure, a reason. `onStatus` reports coarse
  *  progress for the UI. */
 export async function submitClaim(
@@ -91,7 +58,7 @@ export async function submitClaim(
   if (!proof) {
     return { ok: false, error: 'no claim proof for this credit — it may already be claimed' }
   }
-  const mintTo = await firstFreePurse(apis, source)
+  const mintTo = await firstFreePurse(apis.assetHub, source)
 
   const tx = apis.assetHub.tx.NftClaims.claim({
     claimant: Enum('Account'),
@@ -100,37 +67,8 @@ export async function submitClaim(
     leaf_index: proof.leafIndex,
     proof: proof.proof,
     collection: params.collection,
-    mint_to: mintTo
+    mint_to: mintTo.address
   })
 
-  return new Promise<ClaimResult>((resolve) => {
-    onStatus('signing')
-    let settled = false
-    const done = (result: ClaimResult): void => {
-      if (settled) return
-      settled = true
-      resolve(result)
-    }
-    const sub = tx.signSubmitAndWatch(signer).subscribe({
-      next: (event) => {
-        // Settle as soon as the mint is IN A BLOCK (~6–12s), not on finality
-        // (~20–60s on this testnet): the best-block state already carries the
-        // dispatch outcome (ok / dispatchError). Finality is a stronger
-        // guarantee we don't make the player wait for — a reorg is rare here
-        // and self-corrects on the next poll. `finalized` stays a safety net
-        // in case best-block state is ever skipped.
-        if (event.type === 'txBestBlocksState' && event.found) {
-          onStatus('inBlock')
-          done(event.ok ? { ok: true } : { ok: false, error: dispatchErrorText(event.dispatchError) })
-          sub.unsubscribe()
-        } else if (event.type === 'finalized') {
-          done(event.ok ? { ok: true } : { ok: false, error: dispatchErrorText(event.dispatchError) })
-          sub.unsubscribe()
-        }
-      },
-      error: (err: unknown) => {
-        done({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      }
-    })
-  })
+  return watchSubmission(tx, signer, onStatus)
 }
