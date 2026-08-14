@@ -81,12 +81,14 @@ sequenceDiagram
 | `chain/product.ts` | the product's DotNS identifier (value pending team ratification) |
 | `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in) |
 | `chain/devPurses.ts` | the dev purse source: in-page DEV_PHRASE derivation over `derive.ts` |
-| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus the generalized `metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) for Instance / Item / Collection queries — the shelf per poll, and the mint flow's item/collection previews |
+| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus the generalized `metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) for Instance / Item / Collection queries — the shelf per poll, and the mint flow's item/collection previews. Also the write-flow purse lookups: `firstFreePurse` (the empty mint/transfer target) and `findPurseHolding` (the purse currently holding a given item — the transfer's sending key) |
 | `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer; plus `fetchClaimProof` — the live inclusion proof for one credit at claim time |
 | `chain/pallets/minters.ts` | Asset Hub read: the collections registered to accept claims (`NftClaims.CollectionMinters`) with names, the mint flow's collection picker |
 | `chain/pallets/preview.ts` | Asset Hub read: `NftClaimsApi.preview_mints` — what a credit would mint into each collection (the blurred preview) |
-| `chain/claim.ts` | builds/signs/watches `NftClaims.claim` — re-fetches the proof, mints into the first free purse, resolves on finality |
-| `chain/signing.ts` / `devSigning.ts` | the signer seam: a `PolkadotSigner` for the claimant — inside a host ONLY the host signs, as its product account (iOS/desktop implement it; gated on a registered DotNS id, dependency #1); the dev DEV_PHRASE signer is plain-browser/QA only and NEVER a host fallback |
+| `chain/claim.ts` | builds `NftClaims.claim` — re-fetches the proof, mints into the first free purse; watches via `submit.ts` |
+| `chain/submit.ts` | sign/submit/watch shared by every write (claim, transfer): settles on in-block inclusion, decodes the dispatch error, never rejects |
+| `chain/transfer.ts` | the send flow's UI facade: `loadSendRecipients` (dev accounts to send to), `sendItem` (re-export of start.ts), `subscribeCanSend` (same signer gate as minting) |
+| `chain/signing.ts` / `devSigning.ts` | the signer seam: a `PolkadotSigner` for the claimant (`getSigner`) or for a sending purse at an index (`getPurseSigner`, the transfer's purse-key origin) — inside a host ONLY the host signs, as its product account (iOS/desktop implement it; gated on a registered DotNS id, dependency #1); the dev DEV_PHRASE signer is plain-browser/QA only and NEVER a host fallback |
 | `chain/mint.ts` | the mint flow's UI-facing facade: load collections/previews, `claimCredit`, and whether the session can sign at all |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/derive.ts` | the DEV-ONLY account deriver: `//nft//i` (the retreat web-demo's convention, adopted 2026-08-11 so both in-house minting surfaces share purses) from `DEV_PHRASE` in-page — inside a container, host product accounts replace it (purses.ts) |
@@ -140,3 +142,25 @@ sequenceDiagram
   (`refreshChainSync`) and the item appears unwrapped via the ordinary scan.
   `awardBlock` now rides along on claimable `OwnedNft`s so the claim can
   find the credit's tree without a second lookup.
+- **Sending** (Phase 2) — IMPLEMENTED for dev. An owned tile's detail view
+  offers **Send**; the overlay (`components/SendOverlay.tsx`) picks a
+  recipient from a searchable dropdown and submits `Scarcity.transfer`, signed
+  by the purse-key origin that holds the item. `chain/start.ts` `sendItem`
+  locates that purse (`findPurseHolding`), asks the signer seam to sign as it
+  (`getPurseSigner` — the host in a container, the dev key otherwise, NEVER a
+  fallback), and transfers into the recipient's first EMPTY purse
+  (`firstFreePurse`) so the item lands on their shelf scan. On success it forces
+  an immediate re-poll and the sent item leaves this shelf.
+  **A purse holds an NFT but no balance**, so a plain signed transfer is
+  rejected at validation (`Invalid::Payment`). The transfer is authorized
+  instead by the chain's `AsScarcity` transaction extension: `sendItem` sets it
+  to `AsNft { instance, state_nonce }` (the purse's current on-chain identity,
+  read alongside the item) via papi's `customSignedExtensions`, which turns the
+  signed purse origin into the fee-free NFT origin. The tx stays mortal (papi
+  default) so a stale authorization can't be replayed past its era, and a
+  successful move bumps the state nonce, cancelling any other outstanding one.
+  **Open — how players address one another (dependency #2/#3):** there is no
+  product answer yet for choosing a recipient, so the dropdown lists the
+  well-known DEV accounts (`chain/derive.ts` `devRecipients`) and a send targets
+  a purse in that account's dev subtree. We transfer between dev accounts; when
+  the platform defines real addressing, only the recipient source changes.

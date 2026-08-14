@@ -1180,6 +1180,72 @@ button {
 }
 @keyframes mintSpin { to { transform: rotate(360deg); } }
 
+/* ---------- Send overlay ---------- */
+/* Reuses the mint overlay shell (.mint-overlay / .mint-card / .mint-btn …).
+   The item is already owned, so its art shows sharp — no blur, no veil. */
+.send-preview {
+  width: 46%; aspect-ratio: 1;
+  margin: 0 auto 14px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 45%, #23213a 0%, #12111c 68%, #0a0910 100%);
+  border: 1px solid var(--line);
+}
+.send-preview-art { width: 100%; height: 100%; object-fit: contain; padding: 12%; }
+
+/* ---------- SearchableSelect ---------- */
+.select { position: relative; margin: 0 0 14px; text-align: left; }
+.select-trigger {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; height: 46px; padding: 0 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  font-family: var(--font-ui); font-size: 14px;
+}
+.select-trigger:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.select-trigger:disabled { opacity: 0.45; }
+.select-value { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-value--empty { color: var(--ink-2); }
+.select-caret { color: var(--ink-2); font-size: 12px; }
+.select-panel {
+  position: absolute; z-index: 3;
+  left: 0; right: 0; top: calc(100% + 6px);
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.select-search {
+  width: 100%; height: 38px; padding: 0 12px; margin-bottom: 6px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  font-family: var(--font-ui); font-size: 13.5px;
+}
+.select-search:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 0; }
+.select-options { list-style: none; margin: 0; padding: 0; max-height: 190px; overflow-y: auto; }
+.select-option {
+  width: 100%; padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--ink-1);
+  font-family: var(--font-ui); font-size: 14px; font-weight: 600;
+  background: transparent; border: none;
+  transition: background 0.12s;
+}
+.select-option:hover { background: rgba(255, 255, 255, 0.07); }
+.select-option--on {
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
+}
+.select-option:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.select-empty { padding: 10px 12px; color: var(--ink-2); font-size: 13px; }
+
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .tile-art, .tile-bloom, .detail-rays, .detail-shimmer, .boot-mark, .empty-orb,

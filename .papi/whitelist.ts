@@ -28,6 +28,10 @@ export const whitelist: (GamingnetAssetHubWhitelistEntry | GamingnetPeopleWhitel
   'query.Scarcity.Collections',
   'api.NftClaimsApi.preview_mints',
   'tx.NftClaims.claim',
+  // Asset Hub: the send flow — moving an owned item to another player's
+  // purse is `Scarcity.transfer`, signed by the sending purse-key origin
+  // (chain/transfer.ts, chain/start.ts sendItem).
+  'tx.Scarcity.transfer',
   // People Chain: earned credits + proofs (pallets/credits.ts)
   'query.NftCredits.NftClaimCreditBlocks',
   'query.NftCredits.NftClaimCreditAwards',

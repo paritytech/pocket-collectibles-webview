@@ -28,6 +28,12 @@ export type FlowEvent =
   | { type: 'flow.mint_submitted'; hash: string; collection: number }
   /** The claim finalised — `success` false carries a `detail` reason. */
   | { type: 'flow.mint_result'; hash: string; success: boolean; detail?: string }
+  /** User opened the send flow for an owned item. */
+  | { type: 'flow.send_opened'; hash: string }
+  /** User confirmed and the transfer was submitted, to recipient `to`. */
+  | { type: 'flow.send_submitted'; hash: string; to: string }
+  /** The transfer landed — `success` false carries a `detail` reason. */
+  | { type: 'flow.send_result'; hash: string; success: boolean; detail?: string }
   /** User asked to dismiss the webview (e.g. tapped the close affordance).
    *  The host should tear down the WebView. */
   | { type: 'flow.close' }

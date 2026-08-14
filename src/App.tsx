@@ -5,6 +5,7 @@ import GalleryScreen, { EmptyGallery } from './screens/GalleryScreen'
 import DetailScreen from './screens/DetailScreen'
 import IntroOverlay from './components/IntroOverlay'
 import MintOverlay from './components/MintOverlay'
+import SendOverlay from './components/SendOverlay'
 import { hasSeenIntro, markIntroSeen } from './firstRun'
 import {
   readInitialCollection,
@@ -18,6 +19,7 @@ import { sendFlowEvent } from './host/send'
 import { isEmbedded } from './host/embed'
 import { stopChainSync } from './chain/start'
 import { subscribeCanMint } from './chain/mint'
+import { subscribeCanSend } from './chain/transfer'
 import { subscribeChainSyncStatus, type ChainSyncStatus } from './chain/status'
 import type { CollectionInput, OwnedNft } from './collection/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
@@ -50,10 +52,13 @@ export default function App() {
   const [selection, setSelection] = useState<Selection | null>(null)
   // A claimable credit the user chose to mint — drives the mint overlay.
   const [mintEntry, setMintEntry] = useState<CollectibleEntry | null>(null)
+  // An owned item the user chose to send — drives the send overlay.
+  const [sendEntry, setSendEntry] = useState<CollectibleEntry | null>(null)
   // Whether this session can sign a claim at all (a real host without
   // product-account signing, or an alias identity, can't) — gates the mint
-  // action so it's never a dead button.
+  // action so it's never a dead button. Sending needs the same capability.
   const [canMint, setCanMint] = useState(false)
+  const [canSend, setCanSend] = useState(false)
   // First-run intro — shown once over the first populated gallery view.
   const [showIntro, setShowIntro] = useState(false)
   const introChecked = useRef(false)
@@ -120,8 +125,9 @@ export default function App() {
   // reads as one (the loop keeps retrying underneath).
   useEffect(() => subscribeChainSyncStatus(setSyncStatus), [])
 
-  // Can this session sign a claim? Re-checked whenever the identity changes.
+  // Can this session sign a claim / a transfer? Re-checked on identity change.
   useEffect(() => subscribeCanMint(setCanMint), [])
+  useEffect(() => subscribeCanSend(setCanSend), [])
 
   // Tag <body> when embedded so CSS flattens the desktop phone frame.
   useEffect(() => {
@@ -249,6 +255,7 @@ export default function App() {
     stopChainSync()
     setSelection(null)
     setMintEntry(null)
+    setSendEntry(null)
     deliverCollection(build())
   }
 
@@ -297,6 +304,7 @@ export default function App() {
             onClose={handleClose}
             onShow={handleShow}
             {...(canMint ? { onMint: setMintEntry } : {})}
+            {...(canSend ? { onSend: setSendEntry } : {})}
           />
         )}
 
@@ -307,6 +315,13 @@ export default function App() {
             mid-reveal, so it isn't tied to `selection`. */}
         {mintEntry && (
           <MintOverlay entry={mintEntry} onClose={() => setMintEntry(null)} />
+        )}
+
+        {/* The send overlay is a sibling of the detail view, same as mint:
+            it covers the detail while transferring and, on success, closes to
+            the refreshed shelf where the sent item is gone. */}
+        {sendEntry && (
+          <SendOverlay entry={sendEntry} onClose={() => setSendEntry(null)} />
         )}
 
         {showIntro && (

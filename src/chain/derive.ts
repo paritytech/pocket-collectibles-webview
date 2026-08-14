@@ -115,6 +115,27 @@ export function devSignerForAddress(address: string): PolkadotSigner | null {
   return getPolkadotSigner(publicKey, 'Sr25519', (input) => sign(input))
 }
 
+/** DEV/QA ONLY: a PolkadotSigner for the purse at `index` under a dev-held
+ *  root ('' = the bare dev player, '//Bob' = dev Bob) — the SENDING key of a
+ *  transfer, which `Scarcity.transfer` runs as the purse-key origin (not the
+ *  root). Keys derive in-page from the public DEV_PHRASE, so testnet-only by
+ *  construction. Inside a host the host signs the purse instead (signing.ts). */
+export function devPurseSignerFor(rootPath: string, index: number): PolkadotSigner {
+  const { publicKey, sign } = devDerive(`${rootPath}${pursePath(index)}`)
+  return getPolkadotSigner(publicKey, 'Sr25519', (input) => sign(input))
+}
+
+/** The well-known dev accounts a send can target, each with the SS58 address
+ *  its purse subtree derives under. DEV/QA ONLY — a stand-in recipient list
+ *  until the platform answers how players address one another (dependency
+ *  #2/#3); we send between dev accounts, so these are the choices. */
+export function devRecipients(): { name: string; address: string; rootPath: string }[] {
+  return DEV_NAMES.map((name) => {
+    const cased = name[0].toUpperCase() + name.slice(1)
+    return { name: cased, address: devAddressOfPath(`//${cased}`), rootPath: `//${cased}` }
+  })
+}
+
 /** Dev-only: which dev-held root an address belongs to — '' for the bare
  *  dev player, '//Bob' for roster roots — or null when it is nobody we
  *  hold a secret for (an arbitrary address: purse derivation impossible,
