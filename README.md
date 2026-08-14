@@ -106,10 +106,8 @@ Bulletin Chain **testnet** CIDs expire (~2 weeks). When artwork stops loading th
 ## Hosting the build
 
 `npm run build` produces a single static `dist/index.html` you can host
-anywhere. The setup used here serves it from the Polkadot Bulletin Chain
-(content-addressed) bound to a DotNS `.dot` name, via a GitHub Action
-(`paritytech/polkadot-app-deploy`) — see [DEPLOY_DOC.md](./DEPLOY_DOC.md) for that
-path. Pull requests get a throwaway preview build linked from a PR comment.
+anywhere — a web server, object storage, or content-addressed storage
+such as the Polkadot Bulletin Chain bound to a DotNS `.dot` name.
 
 ## Security
 

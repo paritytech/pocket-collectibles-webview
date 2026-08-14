@@ -5,14 +5,14 @@
     "gamingnetPeople": {
       "wsUrl": "wss://gamingnet.substrate.dev/people",
       "metadata": ".papi/metadata/gamingnetPeople.scale",
-      "genesis": "0x18640e58ac52e3a45921c7ac46e0d0143c80f9137b0ba9ae15be81f44b4909de",
-      "codeHash": "0xa076a74dff945c8ed4d8ac42caa9f97b51cf813b66fd65b637ae7a531687b720"
+      "genesis": "0x6c5ca8cbb201a2877e563e85c828e45a73a5de0df4682b3c0d119754c984a20f",
+      "codeHash": "0x560f12988e247aa12e36eef7e4d88ad28f32bd13424d5df4989775b212331e6d"
     },
     "gamingnetAssetHub": {
       "wsUrl": "wss://gamingnet.substrate.dev/asset-hub",
       "metadata": ".papi/metadata/gamingnetAssetHub.scale",
-      "genesis": "0x5c553ae24096d5402b86256773a96f80a68d2a713320767fd6480b8540f973e3",
-      "codeHash": "0xbed8f302bfb7a1734ebd83dc9d9e002847a681447dcb4f82101fa58ffc60afae"
+      "genesis": "0x6d5a9c7c9bd83cdd36ae29c0e3acaa2e172e14511e3874dd698110498cc7faca",
+      "codeHash": "0x467e852470e60611f0dd17464e313d0e9f8d0709eb2d3b4b8b41a153632af334"
     }
   }
 }

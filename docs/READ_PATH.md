@@ -47,8 +47,8 @@ sequenceDiagram
         ST->>SC: fetchOwned(addresses)
         SC->>AH: Scarcity.NftsByOwner.getValues([addr…])
         AH-->>SC: Nft { instance, collection, item, minted_at } per hit
-        SC->>AH: metadata "hash" per instance<br/>(Instance → Item → Collection, first match;<br/>cached per instance after first resolve)
-        AH-->>SC: 32-byte identity hash
+        SC->>AH: api ScarcityApi.metadata_batch([Instance(id)…])<br/>(ONE call, all three metadata layers per instance)
+        AH-->>SC: hash/name/image pairs, resolved<br/>Instance → Item → Collection, most specific wins
         SC-->>ST: OwnedNft[] = { hash, mintedAt }
     and earned credits (People Chain, optional)
         ST->>CR: fetchCredits(identity)
@@ -78,7 +78,7 @@ sequenceDiagram
 |---|---|
 | `chain/connection.ts` | where bytes come from: host bridge vs dev WS vs inert; chain multiplexing |
 | `chain/client.ts` | one lazy polkadot-api client per chain; typed apis over generated descriptors (`.papi/whitelist.ts` bounds the generated package) |
-| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, three-level `"hash"` metadata (vendored from the scarcity-tools SDK) |
+| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus ONE `ScarcityApi.metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) per poll |
 | `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer (proof cache for Phase 2) |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/accounts.ts` | the purse-address seam (explicit sources win over the deriver; an explicit `?player=`/`?alias=` URL clears a persisted `?address=` leftover) |

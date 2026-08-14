@@ -11,11 +11,10 @@ import type {
 } from '@polkadot-api/descriptors'
 
 export const whitelist: (GamingnetAssetHubWhitelistEntry | GamingnetPeopleWhitelistEntry)[] = [
-  // Asset Hub: owned items + three-level metadata (pallets/scarcity.ts)
+  // Asset Hub: owned items + all three metadata layers in one batched
+  // runtime call (pallets/scarcity.ts)
   'query.Scarcity.NftsByOwner',
-  'query.Scarcity.InstanceMetadata',
-  'query.Scarcity.ItemMetadata',
-  'query.Scarcity.CollectionMetadata',
+  'api.ScarcityApi.metadata_batch',
   // Asset Hub: claim state (pallets/claims.ts)
   'query.NftClaims.CreditTrees',
   'query.NftClaims.ClaimedCredits',
