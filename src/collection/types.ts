@@ -44,6 +44,10 @@ export interface OwnedNft {
   /** Resolved artwork URL (from the metadata key `image`, served via the
    *  IPFS gateway). Overrides the catalogue-derived art. */
   imageUrl?: string
+  /** For a claimable credit (`pending`), the People-chain block its credit
+   *  was awarded in. The mint flow needs it to re-fetch the inclusion proof
+   *  at claim time (src/chain/claim.ts). Absent on minted items. */
+  awardBlock?: number
 }
 
 export interface CollectionInput {

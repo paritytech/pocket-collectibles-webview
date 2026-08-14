@@ -91,6 +91,15 @@ function coerceMintedAt(v: unknown): number | undefined {
   return sec >= TS_MIN && sec <= TS_MAX ? sec : undefined
 }
 
+/** Coerce a value to a non-negative integer (a block number), or undefined.
+ *  Accepts a number or numeric string; rejects NaN/Infinity/negatives/floats. */
+function coerceBlockNumber(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && v.trim() !== '' ? Number(v)
+    : NaN
+  return Number.isInteger(n) && n >= 0 ? n : undefined
+}
+
 /** Coerce an arbitrary object into a clean OwnedNft, or null if it has
  *  no usable hash. Defensive against partial / mistyped native payloads. */
 function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
@@ -103,6 +112,8 @@ function coerceItem(raw: unknown): { key: string; item: OwnedNft } | null {
   if (mintedAt !== undefined) item.mintedAt = mintedAt
   if (truthyFlag(obj.pending)) item.pending = true
   if (truthyFlag(obj.claimable)) item.claimable = true
+  const awardBlock = coerceBlockNumber(obj.awardBlock)
+  if (awardBlock !== undefined) item.awardBlock = awardBlock
   // On-chain display metadata from the chain-read path. Item names get
   // their own, longer limit — sanitizeDisplayName's 24 graphemes were
   // sized for a player name and truncated real item names ("Sword &
@@ -148,7 +159,7 @@ function scheduleNotify(): void {
  *  in place; see deliverCollection). */
 function signatureOf(): string {
   return Array.from(store.values())
-    .map((o) => [o.hash, o.name ?? '', o.imageUrl ?? '', o.pending ? 'p' : '', o.claimable ? 'c' : '', o.mintedAt ?? ''].join('~'))
+    .map((o) => [o.hash, o.name ?? '', o.imageUrl ?? '', o.pending ? 'p' : '', o.claimable ? 'c' : '', o.mintedAt ?? '', o.awardBlock ?? ''].join('~'))
     .sort()
     .join(',') + `|${displayName ?? ''}`
 }

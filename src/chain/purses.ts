@@ -24,11 +24,13 @@ export interface PurseSource {
  *  indexes every poll — but a FAILED call is dropped so the next poll
  *  retries it.
  *
- *  Null when the capability is absent: outside a container, or in a host
- *  that doesn't implement product accounts — today's hosts don't, so the
- *  capability is PROBED once (index 0) and callers treat null as "mock
- *  with the dev derivation instead" (TEMPORARY stand-in; this seam is the
- *  swap point when hosts land the capability). */
+ *  Null when the host returns no product account: outside a container, or
+ *  when getProductAccount fails. Shipping hosts DO implement product
+ *  accounts (the iOS app and desktop both derive them) — what gates it for
+ *  us is a REAL registered DotNS product id (dependency #1); ours is a
+ *  placeholder, and the Polkadot Browser host we first probed didn't serve
+ *  it either. So the capability is PROBED once (index 0) and, on null,
+ *  callers stand in the dev derivation (TEMPORARY, until the id lands). */
 let sessionSource: Promise<PurseSource | null> | null = null
 
 export function hostPurseSource(): Promise<PurseSource | null> {

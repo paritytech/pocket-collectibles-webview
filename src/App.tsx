@@ -4,6 +4,7 @@ import ParticleCanvas, { type ParticleCanvasApi } from './components/ParticleCan
 import GalleryScreen, { EmptyGallery } from './screens/GalleryScreen'
 import DetailScreen from './screens/DetailScreen'
 import IntroOverlay from './components/IntroOverlay'
+import MintOverlay from './components/MintOverlay'
 import { hasSeenIntro, markIntroSeen } from './firstRun'
 import {
   readInitialCollection,
@@ -16,6 +17,7 @@ import {
 import { sendFlowEvent } from './host/send'
 import { isEmbedded } from './host/embed'
 import { stopChainSync } from './chain/start'
+import { subscribeCanMint } from './chain/mint'
 import { subscribeChainSyncStatus, type ChainSyncStatus } from './chain/status'
 import type { CollectionInput, OwnedNft } from './collection/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
@@ -46,6 +48,12 @@ export default function App() {
   const [bootTimedOut, setBootTimedOut] = useState(false)
   const [syncStatus, setSyncStatus] = useState<ChainSyncStatus>('idle')
   const [selection, setSelection] = useState<Selection | null>(null)
+  // A claimable credit the user chose to mint — drives the mint overlay.
+  const [mintEntry, setMintEntry] = useState<CollectibleEntry | null>(null)
+  // Whether this session can sign a claim at all (a real host without
+  // product-account signing, or an alias identity, can't) — gates the mint
+  // action so it's never a dead button.
+  const [canMint, setCanMint] = useState(false)
   // First-run intro — shown once over the first populated gallery view.
   const [showIntro, setShowIntro] = useState(false)
   const introChecked = useRef(false)
@@ -111,6 +119,9 @@ export default function App() {
   // Chain-sync health, so an empty shelf caused by a connection failure
   // reads as one (the loop keeps retrying underneath).
   useEffect(() => subscribeChainSyncStatus(setSyncStatus), [])
+
+  // Can this session sign a claim? Re-checked whenever the identity changes.
+  useEffect(() => subscribeCanMint(setCanMint), [])
 
   // Tag <body> when embedded so CSS flattens the desktop phone frame.
   useEffect(() => {
@@ -237,6 +248,7 @@ export default function App() {
     // rest of the session (a ?mock= boot never starts it in the first place).
     stopChainSync()
     setSelection(null)
+    setMintEntry(null)
     deliverCollection(build())
   }
 
@@ -284,7 +296,17 @@ export default function App() {
             originRect={selection.originRect}
             onClose={handleClose}
             onShow={handleShow}
+            {...(canMint ? { onMint: setMintEntry } : {})}
           />
+        )}
+
+        {/* The mint overlay is a sibling of the detail view (higher z-index),
+            so it covers it while minting and, after the reveal, closes to the
+            refreshed shelf where the item now sits unwrapped. It owns its own
+            lifecycle — a poll-driven generation bump must not unmount it
+            mid-reveal, so it isn't tied to `selection`. */}
+        {mintEntry && (
+          <MintOverlay entry={mintEntry} onClose={() => setMintEntry(null)} />
         )}
 
         {showIntro && (

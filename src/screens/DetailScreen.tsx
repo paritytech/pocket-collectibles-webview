@@ -18,13 +18,19 @@ interface DetailScreenProps {
   /** Fired whenever the visible item changes (open + each swipe), with the
    *  newly-shown hash. Drives flow.item_opened telemetry. */
   onShow: (hash: string) => void
+  /** Open the mint flow for a claimable credit. Provided only when this
+   *  session can sign a claim — absent, the mint action isn't shown. */
+  onMint?: (entry: CollectibleEntry) => void
 }
 
 const SWIPE_THRESHOLD = 48 // px of horizontal travel to commit a swipe
 
-export default function DetailScreen({ list, index: initialIndex, originRect, onClose, onShow }: DetailScreenProps) {
+export default function DetailScreen({ list, index: initialIndex, originRect, onClose, onShow, onMint }: DetailScreenProps) {
   const [index, setIndex] = useState(initialIndex)
   const entry = list[index]!
+  // A claimable credit can be minted, but only when the session can sign
+  // (onMint provided). Everything else keeps the "Send — coming soon" stub.
+  const canMint = onMint !== undefined && entry.pending && entry.claimable === true
 
   // Glow colour matched to the current item, taken from the swatch hex baked
   // into its catalogue filename. Drives the tinted backdrop, hero glow and
@@ -276,25 +282,42 @@ export default function DetailScreen({ list, index: initialIndex, originRect, on
           </div>
         </dl>
 
-        {/* Send a collectible to a friend — not available yet. Looks disabled
-            but stays tappable so a tap surfaces the "coming soon" tooltip. */}
-        <div className="detail-send-wrap">
-          {sendHint && (
-            <div className="detail-send-hint" role="status">Functionality coming soon</div>
-          )}
-          <button
-            type="button"
-            className="detail-send"
-            aria-disabled="true"
-            title="Functionality coming soon"
-            onClick={showSendHint}
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
-              <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-            Send
-          </button>
-        </div>
+        {/* A claimable credit shows the primary Mint action; everything else
+            keeps the not-yet-available "Send" stub (tappable so its tap
+            surfaces the "coming soon" tooltip, since a real disabled button
+            swallows the event). */}
+        {canMint ? (
+          <div className="detail-send-wrap">
+            <button
+              type="button"
+              className="detail-mint"
+              onClick={() => onMint!(entry)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
+                <path d="M12 2 4 7v10l8 5 8-5V7l-8-5zm0 2.3 5.5 3.4L12 11 6.5 7.7 12 4.3z" />
+              </svg>
+              Reveal
+            </button>
+          </div>
+        ) : (
+          <div className="detail-send-wrap">
+            {sendHint && (
+              <div className="detail-send-hint" role="status">Functionality coming soon</div>
+            )}
+            <button
+              type="button"
+              className="detail-send"
+              aria-disabled="true"
+              title="Functionality coming soon"
+              onClick={showSendHint}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
+                <path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z" />
+              </svg>
+              Send
+            </button>
+          </div>
+        )}
       </div>
       </div>
     </div>

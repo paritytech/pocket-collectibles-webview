@@ -81,13 +81,18 @@ sequenceDiagram
 | `chain/product.ts` | the product's DotNS identifier (value pending team ratification) |
 | `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in) |
 | `chain/devPurses.ts` | the dev purse source: in-page DEV_PHRASE derivation over `derive.ts` |
-| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus ONE `ScarcityApi.metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) per poll |
-| `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer |
+| `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus the generalized `metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) for Instance / Item / Collection queries — the shelf per poll, and the mint flow's item/collection previews |
+| `chain/pallets/credits.ts` | People Chain reads: award blocks, roots, proofs, rootless awards buffer; plus `fetchClaimProof` — the live inclusion proof for one credit at claim time |
+| `chain/pallets/minters.ts` | Asset Hub read: the collections registered to accept claims (`NftClaims.CollectionMinters`) with names, the mint flow's collection picker |
+| `chain/pallets/preview.ts` | Asset Hub read: `NftClaimsApi.preview_mints` — what a credit would mint into each collection (the blurred preview) |
+| `chain/claim.ts` | builds/signs/watches `NftClaims.claim` — re-fetches the proof, mints into the first free purse, resolves on finality |
+| `chain/signing.ts` / `devSigning.ts` | the signer seam: a `PolkadotSigner` for the claimant — inside a host ONLY the host signs, as its product account (iOS/desktop implement it; gated on a registered DotNS id, dependency #1); the dev DEV_PHRASE signer is plain-browser/QA only and NEVER a host fallback |
+| `chain/mint.ts` | the mint flow's UI-facing facade: load collections/previews, `claimCredit`, and whether the session can sign at all |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/derive.ts` | the DEV-ONLY account deriver: `//nft//i` (the retreat web-demo's convention, adopted 2026-08-11 so both in-house minting surfaces share purses) from `DEV_PHRASE` in-page — inside a container, host product accounts replace it (purses.ts) |
 | `chain/identity.ts` | the player-identity seam: type, validation gate, subscription; container → product account 0 via `initIdentity()` |
 | `chain/devIdentity.ts` | the dev identity inputs: `?player=`/`?alias=` QA override, dev-name expansion, dev-session persistence |
-| `chain/start.ts` | the loop: inputs → parallel fetch → mergeShelf → deliverCollection; errors → `flow.error phase=chain` + backoff (a host refusing Asset Hub stops the session's sync) |
+| `chain/start.ts` | the loop: inputs → parallel fetch → mergeShelf → deliverCollection; errors → `flow.error phase=chain` + backoff. Also `claimCredit` (gathers connection/identity/signer/purse, submits, forces a refresh) and `refreshChainSync` (immediate re-poll) |
 | `collection/store.ts` | the single store the chain sync (and dev mocks) feed |
 
 ## Not implemented yet (marked seams)
@@ -117,11 +122,21 @@ sequenceDiagram
   `"hash"` metadata at claim time) or an indexer. Replaying the pallet's
   item selection to guess was tried and REJECTED (fails silently when
   the collection grows).
-- **Claiming/minting** (Phase 2) — `nft_claim_credit_proofs` hands out
-  ready-made inclusion proofs (the claim builder re-fetches at claim
-  time; a cross-poll proof cache was removed 2026-08-12) and Claimable
-  items are flagged (`OwnedNft.claimable`); `NftClaims.claim(block,
-  credit, leaf_index, proof, collection, mint_to)` is live on the testnet
-  Asset Hub, so what remains is the claim builder, the signing seam — and
-  the identity carry-through above, without which a fresh claim's item
-  won't show as the credit it came from.
+- **Claiming/minting** (Phase 2) — IMPLEMENTED. A claimable tile's detail
+  view offers **Mint**; the overlay (`components/MintOverlay.tsx`) lets the
+  player pick a collection, previews the exact item that would mint
+  (`preview_mints`, shown blurred — Random selection is deterministic, so
+  the preview IS the mint), and on confirm submits `NftClaims.claim` via
+  `chain/claim.ts`: the inclusion proof is re-fetched live
+  (`fetchClaimProof`), `mint_to` is the first free purse, and the claimant
+  kind is `Account` (a Person/alias claim, dependency #2/#3, is not built).
+  Signing is the `signing.ts`/`devSigning.ts` seam — inside a host ONLY the
+  host signs, as its product account (the iOS and desktop apps implement
+  this; gated on a registered DotNS product id, dependency #1). The dev
+  DEV_PHRASE signer is NEVER a host fallback (its key is public) — it serves
+  only a plain-browser session or an explicit `?player=` QA override. A
+  container that can't get a host signer hides the Mint action rather than
+  reaching for the dev key. On finality the flow forces an immediate re-poll
+  (`refreshChainSync`) and the item appears unwrapped via the ordinary scan.
+  `awardBlock` now rides along on claimable `OwnedNft`s so the claim can
+  find the credit's tree without a second lookup.

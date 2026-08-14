@@ -31,32 +31,39 @@ type Nft = NonNullable<
 /** One `metadata_batch` result: every metadata pair of all three layers,
  *  as `[key, value]` byte pairs. A missing target resolves to empty
  *  layers, never an error. */
-type MetadataLayers = Extract<
+export type MetadataLayers = Extract<
   Awaited<ReturnType<AssetHubApi['apis']['ScarcityApi']['metadata_batch']>>,
   { success: true }
 >['value'][number]
+
+/** One `metadata_batch` query: an `Instance`, an `{collection, item}` Item,
+ *  or a bare `Collection` id — the mint-flow preview resolves item and
+ *  collection metadata BEFORE anything is minted (pallets/preview.ts,
+ *  pallets/minters.ts), so the batch is no longer instance-only. */
+export type MetadataQuery = Parameters<
+  AssetHubApi['apis']['ScarcityApi']['metadata_batch']
+>[0][number]
 
 // Runtime cap on queries per metadata_batch call — an oversized request
 // fails TooLarge outright rather than truncating, so chunk below it.
 const METADATA_BATCH_LIMIT = 128
 
-/** All metadata of MANY instances in ONE runtime call (chunked at the
+/** All metadata of MANY targets in ONE runtime call (chunked at the
  *  runtime's cap, chunks in parallel): `ScarcityApi.metadata_batch`
  *  returns every pair of all three layers per query, positionally —
- *  out[i] answers instances[i]. Replaces the former per-tier getValues
- *  walk (≤9 storage round trips). */
-async function batchInstanceMetadata(
+ *  out[i] answers queries[i]. Replaces the former per-tier getValues
+ *  walk (≤9 storage round trips). Queries mix freely (Instance / Item /
+ *  Collection). */
+export async function metadataBatch(
   api: AssetHubApi,
-  instances: bigint[]
+  queries: MetadataQuery[]
 ): Promise<MetadataLayers[]> {
-  const chunks: bigint[][] = []
-  for (let i = 0; i < instances.length; i += METADATA_BATCH_LIMIT) {
-    chunks.push(instances.slice(i, i + METADATA_BATCH_LIMIT))
+  const chunks: MetadataQuery[][] = []
+  for (let i = 0; i < queries.length; i += METADATA_BATCH_LIMIT) {
+    chunks.push(queries.slice(i, i + METADATA_BATCH_LIMIT))
   }
   const results = await Promise.all(
-    chunks.map((chunk) =>
-      api.apis.ScarcityApi.metadata_batch(chunk.map((i) => Enum('Instance', i)), AT)
-    )
+    chunks.map((chunk) => api.apis.ScarcityApi.metadata_batch(chunk, AT))
   )
   return results.flatMap((result) => {
     if (!result.success) throw new Error('metadata_batch refused the query batch')
@@ -71,8 +78,10 @@ function bytesEq(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /** Effective value for `key`, resolved instance -> item -> collection,
- *  most specific wins (mirrors the pallet's `instance_metadata_of`). */
-function layeredValueOf(layers: MetadataLayers, key: Uint8Array): Uint8Array | undefined {
+ *  most specific wins (mirrors the pallet's `instance_metadata_of`). An
+ *  Item or Collection query simply has an empty `instance` tier, so the
+ *  same resolution serves the mint-flow preview. */
+export function layeredValueOf(layers: MetadataLayers, key: Uint8Array): Uint8Array | undefined {
   for (const tier of [layers.instance, layers.item, layers.collection]) {
     for (const [k, v] of tier) if (bytesEq(k, key)) return v
   }
@@ -84,6 +93,23 @@ function layeredValueOf(layers: MetadataLayers, key: Uint8Array): Uint8Array | u
 const HASH_KEY = new TextEncoder().encode(HASH_METADATA_KEY)
 const NAME_KEY = new TextEncoder().encode('name')
 const IMAGE_KEY = new TextEncoder().encode('image')
+
+/** The display name and artwork URL carried by a set of metadata layers,
+ *  most-specific tier winning (see layeredValueOf). Shared by the owned
+ *  read and the mint-flow preview so both resolve names/images the same
+ *  way — an unset key yields undefined, a non-fetchable image yields no
+ *  URL. */
+export function resolveDisplay(layers: MetadataLayers): { name?: string; imageUrl?: string } {
+  const out: { name?: string; imageUrl?: string } = {}
+  const name = layeredValueOf(layers, NAME_KEY)
+  if (name) out.name = Binary.toText(name)
+  const image = layeredValueOf(layers, IMAGE_KEY)
+  if (image) {
+    const url = imageUrlOf(Binary.toText(image))
+    if (url) out.imageUrl = url
+  }
+  return out
+}
 
 /*
 * TEMPORARY SOLUTION TO OPEN QUESTION
@@ -138,19 +164,13 @@ export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promi
   })
   if (present.length === 0) return reads
 
-  const layers = await batchInstanceMetadata(api, present.map((p) => p.nft.instance))
+  const layers = await metadataBatch(api, present.map((p) => Enum('Instance', p.nft.instance)))
   present.forEach((p, k) => {
     const found = layers[k]
     const hashBytes = found && layeredValueOf(found, HASH_KEY)
     const hash = hashBytes ? Binary.toHex(hashBytes) : `instance-${p.nft.instance}`
     const item: OwnedNft = { hash, mintedAt: Number(p.nft.minted_at) }
-    const name = found && layeredValueOf(found, NAME_KEY)
-    if (name) item.name = Binary.toText(name)
-    const image = found && layeredValueOf(found, IMAGE_KEY)
-    if (image) {
-      const url = imageUrlOf(Binary.toText(image))
-      if (url) item.imageUrl = url
-    }
+    if (found) Object.assign(item, resolveDisplay(found))
     reads[p.pos] = { occupied: true, item }
   })
   return reads
