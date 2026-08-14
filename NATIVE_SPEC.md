@@ -255,10 +255,12 @@ account, via the SDK accounts provider's `getProductAccountSigner` — which the
 **iOS and desktop apps implement** (the Polkadot Browser host we first probed
 did not). What gates it for this product is a **registered DotNS product id**
 (dependency #1): the host derives the account from that id's subtree, and ours
-is still a placeholder. Until it's registered, a container falls back to the
-dev DEV_PHRASE signer as a TEMPORARY stand-in, and a session that still can't
-sign hides the Mint action. Person/alias claims (dependency #2/#3) are not
-built — the claimant kind is always `Account`.
+is still a placeholder. The dev DEV_PHRASE signer is **never** a host fallback
+(its key is public) — inside a container only the host signs, and a container
+that can't get a host signer hides the Mint action. The dev signer serves only
+a plain-browser session or an explicit `?player=` QA override. Person/alias
+claims (dependency #2/#3) are not built — the claimant kind is always
+`Account`.
 
 ---
 

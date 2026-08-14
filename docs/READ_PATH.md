@@ -86,7 +86,7 @@ sequenceDiagram
 | `chain/pallets/minters.ts` | Asset Hub read: the collections registered to accept claims (`NftClaims.CollectionMinters`) with names, the mint flow's collection picker |
 | `chain/pallets/preview.ts` | Asset Hub read: `NftClaimsApi.preview_mints` — what a credit would mint into each collection (the blurred preview) |
 | `chain/claim.ts` | builds/signs/watches `NftClaims.claim` — re-fetches the proof, mints into the first free purse, resolves on finality |
-| `chain/signing.ts` / `devSigning.ts` | the signer seam: a `PolkadotSigner` for the claimant — the host signs as its product account (iOS/desktop implement it; gated on a registered DotNS id, dependency #1), with the dev DEV_PHRASE signer as the plain-browser/QA path and TEMPORARY stand-in |
+| `chain/signing.ts` / `devSigning.ts` | the signer seam: a `PolkadotSigner` for the claimant — inside a host ONLY the host signs, as its product account (iOS/desktop implement it; gated on a registered DotNS id, dependency #1); the dev DEV_PHRASE signer is plain-browser/QA only and NEVER a host fallback |
 | `chain/mint.ts` | the mint flow's UI-facing facade: load collections/previews, `claimCredit`, and whether the session can sign at all |
 | `chain/pallets/claims.ts` | Asset Hub nft-claims reads: `CreditTrees` root arrival, `ClaimedCredits` claimed leaves → per-credit Earned/Claimable/claimed state |
 | `chain/derive.ts` | the DEV-ONLY account deriver: `//nft//i` (the retreat web-demo's convention, adopted 2026-08-11 so both in-house minting surfaces share purses) from `DEV_PHRASE` in-page — inside a container, host product accounts replace it (purses.ts) |
@@ -130,11 +130,13 @@ sequenceDiagram
   `chain/claim.ts`: the inclusion proof is re-fetched live
   (`fetchClaimProof`), `mint_to` is the first free purse, and the claimant
   kind is `Account` (a Person/alias claim, dependency #2/#3, is not built).
-  Signing is the `signing.ts`/`devSigning.ts` seam — the host signs as its
-  product account (the iOS and desktop apps implement this; gated on a
-  registered DotNS product id, dependency #1), with the dev signer standing
-  in for plain-browser/QA and until that id lands. A session that still
-  can't sign hides the Mint action rather than dead-ending. On finality the flow forces an immediate re-poll
+  Signing is the `signing.ts`/`devSigning.ts` seam — inside a host ONLY the
+  host signs, as its product account (the iOS and desktop apps implement
+  this; gated on a registered DotNS product id, dependency #1). The dev
+  DEV_PHRASE signer is NEVER a host fallback (its key is public) — it serves
+  only a plain-browser session or an explicit `?player=` QA override. A
+  container that can't get a host signer hides the Mint action rather than
+  reaching for the dev key. On finality the flow forces an immediate re-poll
   (`refreshChainSync`) and the item appears unwrapped via the ordinary scan.
   `awardBlock` now rides along on claimable `OwnedNft`s so the claim can
   find the credit's tree without a second lookup.

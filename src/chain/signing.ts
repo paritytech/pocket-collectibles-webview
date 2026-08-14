@@ -1,49 +1,41 @@
-// Who signs the mint claim — one seam, two key sources, mirroring purses.ts
-// and identity.ts.
+// Who signs the mint claim — one seam, two key sources that NEVER overlap.
 //
-//   DEV — an in-page DEV_PHRASE signer (devSigning.ts), for plain-browser and
-//   ?player= QA sessions. Only answers for keys we hold, so a real host
-//   account falls through to the host path below.
-//   CONTAINER — the host signs as the product account (the claimant is product
-//   account 0, shared with identity.ts) via the SDK AccountsProvider's
-//   getProductAccountSigner. This IS implemented in shipping hosts — the iOS
-//   app (accountGet + signPayload) and desktop (RFC-0022 product subtree
-//   derivation) both do it. What gates it for us is a REAL registered DotNS
-//   product id: the host derives the account from `DOTNS_IDENTIFIER`'s subtree,
-//   and ours is still a placeholder (dependency #1, chain/product.ts). Until
-//   that id is registered — or in a host that doesn't serve it (e.g. the
-//   Polkadot Browser we first probed) — getProductAccount fails and the caller
-//   gets null.
+//   CONTAINER (host) — the host signs as the product account (the claimant is
+//   product account 0, shared with identity.ts) via the SDK AccountsProvider's
+//   getProductAccountSigner. This is implemented by the iOS app (accountGet +
+//   signPayload) and desktop (RFC-0022 product subtree). What gates it for us
+//   is a REAL registered DotNS product id (dependency #1, chain/product.ts);
+//   ours is a placeholder, so getProductAccount fails for now.
+//   DEV — an in-page DEV_PHRASE signer (devSigning.ts), for a plain-browser
+//   session or an explicit ?player=/?alias= QA override.
 //
-// A session that cannot sign (an unregistered product id / a host without the
-// capability, or an alias identity — Person claims aren't built, dependency
-// #2/#3) yields null, and the UI hides the mint action rather than offering a
-// dead button.
+// HARD RULE: the dev signer is NEVER a fallback for host signing. Its key is
+// the public, well-known dev mnemonic — signing a real claim with it inside a
+// host would be a security hole. So inside a container (with no explicit dev
+// override) ONLY the host may sign; if it can't (unregistered id / a host that
+// lacks the capability), getSigner returns null and the UI hides the Reveal
+// action rather than reaching for the dev key. The container's dev-derived
+// identity/purse stand-in is a read-only display affordance — it never signs.
+//
+// Person/alias claims aren't built (dependency #2/#3), so only account
+// claimants sign.
 
 import { getAccountsProvider } from '@parity/product-sdk-host'
 import type { PolkadotSigner } from 'polkadot-api/signer'
 import { isInContainer } from '../host/embed'
 import { DOTNS_IDENTIFIER } from './product'
+import { hasDevOverride } from './devIdentity'
 import type { PlayerIdentity } from './identity'
 import { devSignerFor } from './devSigning'
 
-/** A signer for the claimant, or null when this session can't sign. Person
- *  aliases (dependency #2/#3) aren't built — only account claimants sign. */
+/** A signer for the claimant, or null when this session can't sign. */
 export async function getSigner(identity: PlayerIdentity | null): Promise<PolkadotSigner | null> {
   if (!identity || identity.kind !== 'account') return null
 
-  // A dev-held identity signs in-page: a plain-browser session, or a ?player=
-  // QA override inside a host. devSignerFor answers only for keys derivable
-  // from DEV_PHRASE, so a real host product account returns null here and
-  // falls through to the host path.
-  const devSigner = devSignerFor(identity)
-  if (devSigner) return devSigner
-
-  // Otherwise ask the host to sign as its product account (index 0 — the same
-  // account identity.ts resolves the player to). Returns null when the host
-  // lacks product accounts or the DotNS id isn't registered (dependency #1);
-  // the claim button then stays hidden.
-  if (isInContainer) {
+  // Inside a host container, only the host signs — never the dev key. The one
+  // exception is an explicit ?player=/?alias= QA override, which opts the
+  // session into dev signing on purpose (handled by the dev path below).
+  if (isInContainer && !hasDevOverride()) {
     const provider = await getAccountsProvider()
     if (provider) {
       const account = await provider
@@ -51,6 +43,11 @@ export async function getSigner(identity: PlayerIdentity | null): Promise<Polkad
         .match((a) => a, () => null)
       if (account) return provider.getProductAccountSigner(account)
     }
+    // Host can't sign → do NOT fall back to the dev key; hide the action.
+    return null
   }
-  return null
+
+  // Plain browser, or an explicit QA override: sign in-page with the dev key.
+  // Only answers for dev-held identities, null for anything else.
+  return devSignerFor(identity)
 }
