@@ -46,6 +46,11 @@ export default function MintOverlay({ entry, onClose }: MintOverlayProps) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [status, setStatus] = useState<ClaimStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Per-image load tracking, keyed by URL so switching collections re-shows
+  // the spinner until the new artwork paints (and a broken image falls back
+  // to the placeholder instead of a blank box).
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
   const closedRef = useRef(false)
 
   // Load the registered collections and their previews once.
@@ -138,6 +143,10 @@ export default function MintOverlay({ entry, onClose }: MintOverlayProps) {
 
   const revealed = phase === 'revealing'
   const artUrl = mints?.imageUrl
+  const artErrored = artUrl !== undefined && failedUrl === artUrl
+  // Spinner shows while a real image is still fetching (not while revealing,
+  // and not once it's loaded or errored out to the placeholder).
+  const artLoading = artUrl !== undefined && !artErrored && !revealed && loadedUrl !== artUrl
 
   const card = (
     <div
@@ -162,23 +171,35 @@ export default function MintOverlay({ entry, onClose }: MintOverlayProps) {
         </h2>
 
         {phase === 'loading' ? (
-          <div className="mint-preview mint-preview--loading" aria-busy="true">
-            <span className="mint-spinner" aria-hidden="true" />
-          </div>
+          <>
+            <div className="mint-preview mint-preview--loading" aria-busy="true">
+              <span className="mint-spinner" aria-hidden="true" />
+            </div>
+            <p className="mint-copy" role="status">Preparing your reveal…</p>
+            <div className="chip-strip" aria-hidden="true">
+              <span className="chip-skeleton" />
+              <span className="chip-skeleton" />
+              <span className="chip-skeleton" />
+            </div>
+          </>
         ) : (
           <>
-            <div className={`mint-preview${revealed ? ' mint-preview--revealed' : ''}`}>
-              {artUrl ? (
+            <div className={`mint-preview${revealed ? ' mint-preview--revealed' : ''}`} aria-busy={artLoading}>
+              {artUrl && !artErrored ? (
                 <img
+                  key={artUrl}
                   className="mint-preview-art"
                   src={artUrl}
                   alt={revealed ? (mints?.name ?? 'Your collectible') : 'A blurred preview of your collectible'}
                   draggable={false}
+                  onLoad={() => setLoadedUrl(artUrl)}
+                  onError={() => { setLoadedUrl(artUrl); setFailedUrl(artUrl) }}
                 />
               ) : (
                 <div className="mint-preview-placeholder" aria-hidden="true" />
               )}
               {!revealed && <div className="mint-preview-veil" aria-hidden="true" />}
+              {artLoading && <span className="mint-spinner mint-preview-spinner" aria-hidden="true" />}
             </div>
 
             {revealed ? (

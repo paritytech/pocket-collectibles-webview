@@ -1062,7 +1062,40 @@ button {
   background: radial-gradient(circle at 50% 45%, #23213a 0%, #12111c 68%, #0a0910 100%);
   border: 1px solid var(--line);
 }
-.mint-preview--loading { display: grid; place-items: center; }
+.mint-preview--loading { display: grid; place-items: center; position: relative; overflow: hidden; }
+/* A soft light sweep across the box so it reads as actively working, with the
+   spinner on top. */
+.mint-preview--loading::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(118, 134, 255, 0.14) 50%, transparent 80%);
+  background-size: 220% 100%;
+  animation: mintShimmer 1.3s ease-in-out infinite;
+}
+.mint-spinner { position: relative; z-index: 1; }
+/* Spinner centred over the preview box while its artwork is still fetching.
+   Positioned with a margin offset (not translate) so it doesn't fight the
+   spin rotation. */
+.mint-preview-spinner {
+  position: absolute;
+  top: 50%; left: 50%;
+  margin: -17px 0 0 -17px;
+  z-index: 2;
+}
+@keyframes mintShimmer { from { background-position: 220% 0; } to { background-position: -220% 0; } }
+
+/* Placeholder chips while the real collections load — keeps the layout from
+   jumping when they arrive. */
+.chip-skeleton {
+  width: 88px; height: 35px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  animation: mintSkeleton 1.3s ease-in-out infinite;
+}
+.chip-skeleton:nth-child(2) { width: 104px; animation-delay: 0.15s; }
+.chip-skeleton:nth-child(3) { width: 78px; animation-delay: 0.3s; }
+@keyframes mintSkeleton { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
 .mint-preview-art {
   width: 100%; height: 100%;
   object-fit: contain;
@@ -1153,6 +1186,7 @@ button {
   .intro-card, .infotip-overlay, .infotip-card,
   .gift, .gift-lid, .gift-spark,
   .mint-overlay, .mint-card, .mint-spinner,
+  .mint-preview--loading::before, .chip-skeleton,
   .detail-send-hint { animation: none !important; }
   /* Still resolve the blur on reveal, just without the long transition. */
   .mint-preview-art { transition: filter 0.2s ease, transform 0.2s ease; }

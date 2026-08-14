@@ -113,10 +113,17 @@ export async function submitClaim(
     }
     const sub = tx.signSubmitAndWatch(signer).subscribe({
       next: (event) => {
+        // Settle as soon as the mint is IN A BLOCK (~6–12s), not on finality
+        // (~20–60s on this testnet): the best-block state already carries the
+        // dispatch outcome (ok / dispatchError). Finality is a stronger
+        // guarantee we don't make the player wait for — a reorg is rare here
+        // and self-corrects on the next poll. `finalized` stays a safety net
+        // in case best-block state is ever skipped.
         if (event.type === 'txBestBlocksState' && event.found) {
           onStatus('inBlock')
+          done(event.ok ? { ok: true } : { ok: false, error: dispatchErrorText(event.dispatchError) })
+          sub.unsubscribe()
         } else if (event.type === 'finalized') {
-          onStatus('finalized')
           done(event.ok ? { ok: true } : { ok: false, error: dispatchErrorText(event.dispatchError) })
           sub.unsubscribe()
         }
