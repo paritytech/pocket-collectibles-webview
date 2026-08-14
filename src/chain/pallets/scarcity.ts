@@ -12,7 +12,7 @@
 // convention it lives in metadata under the key "hash", resolved
 // instance -> item -> collection (most specific wins).
 
-import { Binary } from 'polkadot-api'
+import { Binary, Enum } from 'polkadot-api'
 import type { OwnedNft } from '../../bridge/types'
 import type { AssetHubApi } from '../client'
 
@@ -28,55 +28,62 @@ type Nft = NonNullable<
   Awaited<ReturnType<AssetHubApi['query']['Scarcity']['NftsByOwner']['getValue']>>
 >
 
-/** Effective metadata value for `key` across MANY nfts at once, resolved
- *  instance -> item -> collection, first match wins (mirrors the pallet's
- *  `instance_metadata_of`). One batched getValues per tier — a constant
- *  ≤3 round trips regardless of how many items the shelf holds, instead
- *  of up to 3 point reads per item. Result is positional: out[i] answers
- *  nfts[i]. Metadata keys/values are `Vec<u8>`, served as bytes. */
-async function batchMetadataOf(
+/** One `metadata_batch` result: every metadata pair of all three layers,
+ *  as `[key, value]` byte pairs. A missing target resolves to empty
+ *  layers, never an error. */
+type MetadataLayers = Extract<
+  Awaited<ReturnType<AssetHubApi['apis']['ScarcityApi']['metadata_batch']>>,
+  { success: true }
+>['value'][number]
+
+// Runtime cap on queries per metadata_batch call — an oversized request
+// fails TooLarge outright rather than truncating, so chunk below it.
+const METADATA_BATCH_LIMIT = 128
+
+/** All metadata of MANY instances in ONE runtime call (chunked at the
+ *  runtime's cap, chunks in parallel): `ScarcityApi.metadata_batch`
+ *  returns every pair of all three layers per query, positionally —
+ *  out[i] answers instances[i]. Replaces the former per-tier getValues
+ *  walk (≤9 storage round trips). */
+async function batchInstanceMetadata(
   api: AssetHubApi,
-  nfts: Nft[],
-  key: string
-): Promise<(Uint8Array | undefined)[]> {
-  const keyBytes = Binary.fromText(key)
-  const out: (Uint8Array | undefined)[] = new Array(nfts.length).fill(undefined)
-  let pending = nfts.map((_, i) => i)
-
-  const take = (entries: ({ value: Uint8Array } | undefined)[]): void => {
-    pending = pending.filter((i, k) => {
-      const entry = entries[k]
-      if (entry && entry.value instanceof Uint8Array) {
-        out[i] = entry.value
-        return false
-      }
-      return true
-    })
+  instances: bigint[]
+): Promise<MetadataLayers[]> {
+  const chunks: bigint[][] = []
+  for (let i = 0; i < instances.length; i += METADATA_BATCH_LIMIT) {
+    chunks.push(instances.slice(i, i + METADATA_BATCH_LIMIT))
   }
-
-  take(await api.query.Scarcity.InstanceMetadata.getValues(
-    pending.map((i) => [nfts[i].instance, keyBytes] as [bigint, typeof keyBytes]), AT))
-  if (pending.length > 0) {
-    take(await api.query.Scarcity.ItemMetadata.getValues(
-      pending.map((i) => [nfts[i].collection, nfts[i].item, keyBytes] as [number, number, typeof keyBytes]), AT))
-  }
-  if (pending.length > 0) {
-    take(await api.query.Scarcity.CollectionMetadata.getValues(
-      pending.map((i) => [nfts[i].collection, keyBytes] as [number, typeof keyBytes]), AT))
-  }
-  return out
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      api.apis.ScarcityApi.metadata_batch(chunk.map((i) => Enum('Instance', i)), AT)
+    )
+  )
+  return results.flatMap((result) => {
+    if (!result.success) throw new Error('metadata_batch refused the query batch')
+    return result.value
+  })
 }
 
-// The identity hash is immutable in practice (it IS the item's identity),
-// so cache it per instance: repeat polls then cost one batched
-// NftsByOwner read instead of up to three metadata reads per item.
-// Name and image are NOT cached: key-value metadata is mutable (the
-// pallet has no freeze), so the design's rule is refresh-on-access.
-const hashCache = new Map<bigint, string>()
+function bytesEq(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
 
-/** Display-metadata keys resolved alongside the identity hash. */
-const NAME_METADATA_KEY = 'name'
-const IMAGE_METADATA_KEY = 'image'
+/** Effective value for `key`, resolved instance -> item -> collection,
+ *  most specific wins (mirrors the pallet's `instance_metadata_of`). */
+function layeredValueOf(layers: MetadataLayers, key: Uint8Array): Uint8Array | undefined {
+  for (const tier of [layers.instance, layers.item, layers.collection]) {
+    for (const [k, v] of tier) if (bytesEq(k, key)) return v
+  }
+  return undefined
+}
+
+/** Display-metadata keys resolved alongside the identity hash, as the
+ *  bytes metadata pairs are keyed by. */
+const HASH_KEY = new TextEncoder().encode(HASH_METADATA_KEY)
+const NAME_KEY = new TextEncoder().encode('name')
+const IMAGE_KEY = new TextEncoder().encode('image')
 
 /*
 * TEMPORARY SOLUTION TO OPEN QUESTION
@@ -111,8 +118,13 @@ export interface PurseRead {
 
 /** Positional reads — result[i] answers addresses[i]. The gap-limit purse
  *  scan (chain/start.ts) needs per-index occupancy, not just the items.
- *  All metadata resolves in ≤9 batched round trips total (3 tiers × 3
- *  keys, keys in parallel), independent of the item count. */
+ *  All metadata (hash, name, image — every key of every layer) arrives in
+ *  ONE metadata_batch call, independent of the item count. Nothing is
+ *  cached across polls: key-value metadata is mutable (the pallet has no
+ *  freeze), so the design's rule is refresh-on-access — an item minted
+ *  without the "hash" identity key (every pallet claim — empty metadata,
+ *  READ_PATH.md) keys as `instance-<id>` this poll but picks up a hash
+ *  written later (tooling backfill) without a reload. */
 export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promise<PurseRead[]> {
   if (addresses.length === 0) return []
   const raws = await api.query.Scarcity.NftsByOwner.getValues(
@@ -126,31 +138,15 @@ export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promi
   })
   if (present.length === 0) return reads
 
-  const nfts = present.map((p) => p.nft)
-  const needHash = present.filter((p) => !hashCache.has(p.nft.instance))
-  const [hashBytes, nameBytes, imageBytes] = await Promise.all([
-    needHash.length > 0
-      ? batchMetadataOf(api, needHash.map((p) => p.nft), HASH_METADATA_KEY)
-      : Promise.resolve<(Uint8Array | undefined)[]>([]),
-    batchMetadataOf(api, nfts, NAME_METADATA_KEY),
-    batchMetadataOf(api, nfts, IMAGE_METADATA_KEY)
-  ])
-  // Only REAL hashes enter the cache: an item minted without the identity
-  // key (every pallet claim — empty metadata, READ_PATH.md) keys as
-  // `instance-<id>` this poll, but stays re-checked so a "hash" written
-  // later (tooling backfill, a future runtime fix) is picked up without
-  // a reload.
-  needHash.forEach((p, k) => {
-    const bytes = hashBytes[k]
-    if (bytes) hashCache.set(p.nft.instance, Binary.toHex(bytes))
-  })
-
+  const layers = await batchInstanceMetadata(api, present.map((p) => p.nft.instance))
   present.forEach((p, k) => {
-    const hash = hashCache.get(p.nft.instance) ?? `instance-${p.nft.instance}`
+    const found = layers[k]
+    const hashBytes = found && layeredValueOf(found, HASH_KEY)
+    const hash = hashBytes ? Binary.toHex(hashBytes) : `instance-${p.nft.instance}`
     const item: OwnedNft = { hash, mintedAt: Number(p.nft.minted_at) }
-    const name = nameBytes[k]
+    const name = found && layeredValueOf(found, NAME_KEY)
     if (name) item.name = Binary.toText(name)
-    const image = imageBytes[k]
+    const image = found && layeredValueOf(found, IMAGE_KEY)
     if (image) {
       const url = imageUrlOf(Binary.toText(image))
       if (url) item.imageUrl = url
