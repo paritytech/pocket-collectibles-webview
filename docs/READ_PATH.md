@@ -77,6 +77,7 @@ sequenceDiagram
 | Module | Owns |
 |---|---|
 | `chain/client.ts` | where bytes come from: product-sdk container (`createChainClient`, host-served by genesis hash; host without our chains → testnet-socket stand-in) vs dev WS vs inert; teardown/rebuild for wedged connections |
+| `chain/devClient.ts` | the dev connection path: direct testnet WebSockets, one lazy client per chain (`TESTNET_WS`) |
 | `chain/product.ts` | the product's DotNS identifier (value pending team ratification) |
 | `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in); dev impl wraps `derive.ts` |
 | `chain/pallets/scarcity.ts` | Asset Hub reads: `NftsByOwner`, plus ONE `ScarcityApi.metadata_batch` runtime call serving all three metadata layers (`"hash"`/`"name"`/`"image"`) per poll |
@@ -102,7 +103,7 @@ sequenceDiagram
   claims (2026-08-11)**: `pallet-nft-claims::claim` mints with empty
   metadata (`mint_without_deposit(.., Vec::new())`), so a claim-minted
   item never carries the credit hash; only tooling-minted items do.
-  Model adopted 2026-08-12 (matches George's design direction): claimed
+  Model adopted 2026-08-12 (matches the design direction): claimed
   credits are DROPPED from the shelf — the shared purse convention means
   their item arrives via the scan, and ownership is the whole story the
   shelf tells. Hashless items (the pallet claim is the only metadata-less

@@ -4,7 +4,8 @@
 //   product-sdk container -> createChainClient: every connection is served
 //                            by the HOST over the truapi port; the webview
 //                            opens no sockets of its own.
-//   plain browser (dev)   -> direct WebSockets to the gaming testnet.
+//   plain browser (dev)   -> direct WebSockets to the gaming testnet
+//                            (devClient.ts).
 //   legacy embedded host  -> no connection at all: the chain layer stays
 //                            inert (cached shelf / boot timeout only).
 //
@@ -15,14 +16,16 @@
 // host for each connection.
 //
 // People Chain is optional in every mode: a container that doesn't serve
-// it degrades the shelf to owned-items-only (same rule as dev today).
+// it degrades the shelf to owned-items-only (same rule as dev today) and
+// is re-probed on every poll, so a host that gains the chain starts
+// serving credits without an app restart.
 
-import { createClient, type TypedApi } from 'polkadot-api'
-import { getWsProvider } from 'polkadot-api/ws'
+import type { TypedApi } from 'polkadot-api'
 import { createChainClient } from '@parity/product-sdk-chain-client'
 import { ChainNotSupportedError } from '@parity/product-sdk-host'
 import { gamingnetAssetHub, gamingnetPeople } from '@polkadot-api/descriptors'
 import { isEmbedded, isInContainer } from '../host/embed'
+import { devApis, destroyDevClients } from './devClient'
 // Legacy-embedded hosts (no container) stay socket-free unless an
 // explicit ?player= override asks for the QA sockets.
 import { hasDevOverride } from './identity'
@@ -37,17 +40,14 @@ export interface ChainApis {
   people: PeopleApi | null
 }
 
-/** Corey's gaming testnet endpoints. Dev fallback only — never used
- *  inside a host of any kind. */
-export const TESTNET_WS = {
-  assetHub: 'wss://gamingnet.substrate.dev/asset-hub', // spec: next-asset-hub-paseo
-  people: 'wss://gamingnet.substrate.dev/people' // spec: Individuality Local
-} as const
-
 // ---- container path -------------------------------------------------------
 
 interface ContainerSession {
   apis: ChainApis
+  /** Probe the host for the People Chain when `apis.people` is null —
+   *  called on every poll, so a host build that gains the chain is picked
+   *  up without an app restart. No-op once connected. */
+  refreshPeople: () => Promise<void>
   destroy: () => void
 }
 
@@ -56,56 +56,70 @@ interface ContainerSession {
 // teardown can never resurrect a destroyed client.
 let containerSession: Promise<ContainerSession> | null = null
 
+// The two chains are separate SDK clients on purpose: support is frozen
+// into a client at creation (an unsupported chain is a proxy that throws
+// forever), so re-probing the People Chain needs a fresh client — which
+// must not tear down the healthy Asset Hub connection to get one.
 async function openContainerSession(): Promise<ContainerSession> {
-  const client = await createChainClient({
-    chains: { assetHub: gamingnetAssetHub, people: gamingnetPeople }
-  })
-  // A chain the host can't serve is a proxy that throws on first property
-  // access. A host without Asset Hub falls back to the direct testnet
-  // sockets — a TEMPORARY stand-in while no host build serves the
-  // gamingnet chains; once hosts do, this fallback should narrow back to
-  // ?player= QA sessions only. A missing People Chain just degrades the
-  // shelf to owned-items-only.
+  const assetHubClient = await createChainClient({ chains: { assetHub: gamingnetAssetHub } })
+  // A host without Asset Hub falls back to the direct testnet sockets — a
+  // TEMPORARY stand-in while no host build serves the gamingnet chains;
+  // once hosts do, this fallback should narrow back to ?player= QA
+  // sessions only.
   try {
-    void client.assetHub.query
+    void assetHubClient.assetHub.query
   } catch (err) {
     if (!(err instanceof ChainNotSupportedError)) throw err
-    try { client.destroy() } catch { /* unusable anyway */ }
+    try { assetHubClient.destroy() } catch { /* unusable anyway */ }
     console.warn('[chain] host does not serve Asset Hub; using direct testnet sockets')
-    return { apis: devApis(), destroy: () => {} }
+    return { apis: devApis(), refreshPeople: async () => {}, destroy: () => {} }
   }
-  let people: PeopleApi | null = client.people
-  try {
-    void client.people.query
-  } catch (err) {
-    if (!(err instanceof ChainNotSupportedError)) throw err
-    console.warn('[chain] host does not serve the People Chain; shelf is owned-items-only')
-    people = null
+
+  const apis: ChainApis = { assetHub: assetHubClient.assetHub, people: null }
+  let destroyPeople: (() => void) | null = null
+  let destroyed = false
+  let warnedMissing = false
+  let probing: Promise<void> | null = null
+
+  async function probePeople(): Promise<void> {
+    const client = await createChainClient({ chains: { people: gamingnetPeople } })
+    try {
+      void client.people.query
+    } catch (err) {
+      if (!(err instanceof ChainNotSupportedError)) throw err
+      // Destroy the refused instance: it holds nothing, and dropping it
+      // from the SDK's cache makes the next probe ask the host fresh
+      // instead of replaying this answer.
+      try { client.destroy() } catch { /* nothing held */ }
+      if (!warnedMissing) {
+        warnedMissing = true
+        console.warn('[chain] host does not serve the People Chain; shelf is owned-items-only (re-probed each poll)')
+      }
+      return
+    }
+    if (destroyed) {
+      try { client.destroy() } catch { /* already torn down */ }
+      return
+    }
+    destroyPeople = () => client.destroy()
+    apis.people = client.people
+    if (warnedMissing) console.warn('[chain] the host now serves the People Chain; credits resume')
   }
+
   return {
-    apis: { assetHub: client.assetHub, people },
-    destroy: () => client.destroy()
-  }
-}
-
-// ---- dev path --------------------------------------------------------------
-
-type DevClient = ReturnType<typeof createClient>
-const devClients = new Map<keyof typeof TESTNET_WS, DevClient>()
-
-function devClient(chain: keyof typeof TESTNET_WS): DevClient {
-  let client = devClients.get(chain)
-  if (!client) {
-    client = createClient(getWsProvider(TESTNET_WS[chain]))
-    devClients.set(chain, client)
-  }
-  return client
-}
-
-function devApis(): ChainApis {
-  return {
-    assetHub: devClient('assetHub').getTypedApi(gamingnetAssetHub),
-    people: devClient('people').getTypedApi(gamingnetPeople)
+    apis,
+    refreshPeople: () => {
+      if (apis.people || destroyed) return Promise.resolve()
+      if (!probing) {
+        probing = probePeople().finally(() => { probing = null })
+      }
+      return probing
+    },
+    destroy: () => {
+      destroyed = true
+      try { assetHubClient.destroy() } catch { /* already down */ }
+      try { destroyPeople?.() } catch { /* already down */ }
+    }
   }
 }
 
@@ -124,7 +138,13 @@ export function getChainApis(): Promise<ChainApis | null> {
         if (containerSession === session) containerSession = null
       })
     }
-    return containerSession.then((s) => s.apis)
+    // Every poll gives the People Chain another chance (no-op once
+    // connected); a hard probe failure surfaces as a poll error and takes
+    // the normal rebuild path.
+    return containerSession.then(async (s) => {
+      await s.refreshPeople()
+      return s.apis
+    })
   }
   if (isEmbedded && !hasDevOverride()) return Promise.resolve(null)
   return Promise.resolve(devApis())
@@ -138,8 +158,5 @@ export function destroyClients(): void {
   if (session) {
     session.then((s) => { try { s.destroy() } catch { /* already down */ } }, () => {})
   }
-  for (const client of devClients.values()) {
-    try { client.destroy() } catch { /* already torn down */ }
-  }
-  devClients.clear()
+  destroyDevClients()
 }

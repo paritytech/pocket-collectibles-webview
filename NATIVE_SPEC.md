@@ -25,8 +25,8 @@ detail view.
 
 | Capability | Detail |
 |---|---|
-| Chain: gamingnet Asset Hub | genesis `0x5c553ae24096d5402b86256773a96f80a68d2a713320767fd6480b8540f973e3` — served via `system.featureSupported` + the truapi `chain.*` domain (`chainHead_v1_*`-capable node) |
-| Chain: gamingnet People | genesis `0x18640e58ac52e3a45921c7ac46e0d0143c80f9137b0ba9ae15be81f44b4909de` — **optional**: without it the shelf is owned-items-only, never an error |
+| Chain: gamingnet Asset Hub | genesis `0x6d5a9c7c9bd83cdd36ae29c0e3acaa2e172e14511e3874dd698110498cc7faca` — served via `system.featureSupported` + the truapi `chain.*` domain (`chainHead_v1_*`-capable node) |
+| Chain: gamingnet People | genesis `0x6c5ca8cbb201a2877e563e85c828e45a73a5de0df4682b3c0d119754c984a20f` — **optional**: without it the shelf is owned-items-only, never an error; re-probed on every poll (~30 s), so a host that gains the chain starts serving credits without an app restart |
 | Product accounts | `account.getProductAccount(<dotNsIdentifier>, i)` for our DotNS identifier (see `src/chain/product.ts`) — index 0 is the player identity, indexes 0..n are the purse subtree the shelf scans |
 | Flow events | a message handler named `collectibles` (unchanged, see §3) |
 | Layout | WebView full-bleed, safe-area insets respected (§5) |
