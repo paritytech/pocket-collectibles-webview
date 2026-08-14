@@ -62,17 +62,24 @@ let containerSession: Promise<ContainerSession> | null = null
 // must not tear down the healthy Asset Hub connection to get one.
 async function openContainerSession(): Promise<ContainerSession> {
   const assetHubClient = await createChainClient({ chains: { assetHub: gamingnetAssetHub } })
-  // A host without Asset Hub falls back to the direct testnet sockets — a
-  // TEMPORARY stand-in while no host build serves the gamingnet chains;
-  // once hosts do, this fallback should narrow back to ?player= QA
-  // sessions only.
+  // Sockets are a dev affordance, NEVER a production fallback: a host
+  // without Asset Hub fails the session, which the poll loop retries with
+  // backoff (each retry re-asks the host, so a host build gaining the
+  // chain is picked up) while the UI shows the connection-error state.
+  // Only an explicit ?player=/?alias= QA override may fall back to the
+  // dev sockets instead.
   try {
     void assetHubClient.assetHub.query
   } catch (err) {
     if (!(err instanceof ChainNotSupportedError)) throw err
+    // Destroy the refused instance so the retry asks the host fresh.
     try { assetHubClient.destroy() } catch { /* unusable anyway */ }
-    console.warn('[chain] host does not serve Asset Hub; using direct testnet sockets')
-    return { apis: devApis(), refreshPeople: async () => {}, destroy: () => {} }
+    if (hasDevOverride()) {
+      console.warn('[chain] host does not serve Asset Hub; QA override session using dev sockets')
+      return { apis: devApis(), refreshPeople: async () => {}, destroy: () => {} }
+    }
+    console.warn('[chain] host does not serve Asset Hub; retrying')
+    throw err
   }
 
   const apis: ChainApis = { assetHub: assetHubClient.assetHub, people: null }

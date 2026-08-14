@@ -16,6 +16,7 @@ import {
 import { sendFlowEvent } from './host/send'
 import { isEmbedded } from './host/embed'
 import { stopChainSync } from './chain/start'
+import { subscribeChainSyncStatus, type ChainSyncStatus } from './chain/status'
 import type { CollectionInput, OwnedNft } from './collection/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
 import { DEV_MOCKS, findMock } from './devMocks'
@@ -43,6 +44,7 @@ export default function App() {
   const [displayName, setDisplayName] = useState<string | undefined>(initial.displayName)
   const [delivered, setDelivered] = useState<boolean>(hasDelivered())
   const [bootTimedOut, setBootTimedOut] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<ChainSyncStatus>('idle')
   const [selection, setSelection] = useState<Selection | null>(null)
   // First-run intro — shown once over the first populated gallery view.
   const [showIntro, setShowIntro] = useState(false)
@@ -105,6 +107,10 @@ export default function App() {
     if (!mock) return
     deliverCollection(mock.build())
   }, [])
+
+  // Chain-sync health, so an empty shelf caused by a connection failure
+  // reads as one (the loop keeps retrying underneath).
+  useEffect(() => subscribeChainSyncStatus(setSyncStatus), [])
 
   // Tag <body> when embedded so CSS flattens the desktop phone frame.
   useEffect(() => {
@@ -237,6 +243,9 @@ export default function App() {
   // Boot screen only while there's nothing to show: cache-seeded entries
   // render at once even though native hasn't spoken yet.
   const showBoot = !delivered && !bootTimedOut && entries.length === 0
+  // Connection trouble only replaces the EMPTY state — a shelf with items
+  // (cached or delivered) keeps showing them while the loop retries.
+  const showSyncError = !showBoot && entries.length === 0 && syncStatus === 'error'
 
   return (
     <div className="page">
@@ -248,7 +257,14 @@ export default function App() {
             <div className="boot-copy">Opening your collection…</div>
           </div>
         )}
-        {!showBoot && entries.length === 0 && <EmptyGallery {...(displayName ? { displayName } : {})} />}
+        {showSyncError && (
+          <div className="sync-error-screen" role="alert">
+            <div className="sync-error-mark" aria-hidden="true">◈</div>
+            <div className="sync-error-title">Can&rsquo;t reach your collection</div>
+            <div className="sync-error-copy">Reconnecting&hellip;</div>
+          </div>
+        )}
+        {!showBoot && !showSyncError && entries.length === 0 && <EmptyGallery {...(displayName ? { displayName } : {})} />}
         {!showBoot && entries.length > 0 && (
           <GalleryScreen
             key={collectionGen}

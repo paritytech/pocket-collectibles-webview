@@ -31,12 +31,15 @@ detail view.
 | Flow events | a message handler named `collectibles` (unchanged, see §3) |
 | Layout | WebView full-bleed, safe-area insets respected (§5) |
 
-> **Both chain capabilities are probed, with TEMPORARY fallbacks** while
-> no host build provides them: a host without product accounts gets the
-> DEV_PHRASE dev derivation as the purse/identity stand-in, and a host
-> that can't serve the gamingnet chains gets direct testnet sockets. Both
-> fallbacks retire once real host builds answer — the seams
-> (`purses.ts`, `client.ts`) are the swap points.
+> **Both capabilities are probed.** A host without product accounts gets
+> the DEV_PHRASE dev derivation as the purse/identity stand-in (TEMPORARY,
+> retires once host builds answer — `purses.ts` is the swap point). A host
+> that can't serve Asset Hub is a RETRIED FAILURE: sockets are a dev
+> affordance and never a production fallback, so the app retries the probe
+> with backoff (picking up a host build that gains the chain) and shows a
+> connection-error state while the shelf has nothing to render. Only an
+> explicit `?player=`/`?alias=` QA override may fall back to the dev
+> sockets.
 
 > A gamingnet **chain reset changes the genesis hashes** — the app's
 > descriptors and every host build must re-sync before container mode

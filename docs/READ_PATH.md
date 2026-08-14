@@ -76,7 +76,7 @@ sequenceDiagram
 
 | Module | Owns |
 |---|---|
-| `chain/client.ts` | where bytes come from: product-sdk container (`createChainClient`, host-served by genesis hash; host without our chains → testnet-socket stand-in) vs dev WS vs inert; teardown/rebuild for wedged connections |
+| `chain/client.ts` | where bytes come from: product-sdk container (`createChainClient`, host-served by genesis hash; host without Asset Hub → retried failure + error state, sockets only under a `?player=` QA override) vs dev WS vs inert; teardown/rebuild for wedged connections |
 | `chain/devClient.ts` | the dev connection path: direct testnet WebSockets, one lazy client per chain (`TESTNET_WS`) |
 | `chain/product.ts` | the product's DotNS identifier (value pending team ratification) |
 | `chain/purses.ts` | the purse-address seam: `PurseSource` — container impl asks the host for product accounts by index (memoized; capability PROBED — absent in today's hosts → dev impl stands in); dev impl wraps `derive.ts` |

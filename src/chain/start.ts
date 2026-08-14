@@ -27,8 +27,8 @@
 //     connection may be opened, so the shelf shows cache or boot-timeout
 //   - ?mock= session -> inert (mocks must never mix with chain data)
 
-import { ChainNotSupportedError } from '@parity/product-sdk-host'
 import { getChainApis, destroyClients, type AssetHubApi } from './client'
+import { setChainSyncStatus } from './status'
 import { fetchOwnedAt } from './pallets/scarcity'
 import { fetchCredits, type Credit } from './pallets/credits'
 import { fetchClaimStates, type ClaimState } from './pallets/claims'
@@ -214,22 +214,21 @@ export function startChainSync(): void {
       )
       if (!running || gen !== generation) return
       backoff = BACKOFF_MIN_MS
+      setChainSyncStatus('ok')
       deliverCollection({ owned: mergeShelf(owned, credits, claimStates) })
       timer = window.setTimeout(() => { void poll() }, REFRESH_MS)
     } catch (err) {
       if (!running || gen !== generation) return
       const detail = err instanceof Error ? err.message : String(err)
       console.warn('[chain] sync failed', err)
+      setChainSyncStatus('error')
       sendFlowEvent({ type: 'flow.error', phase: 'chain', detail })
-      // The host refusing Asset Hub is permanent for this session (its
-      // chain allowlist won't change under us) — stop instead of hammering
-      // it with a retry loop that can never succeed.
-      if (err instanceof ChainNotSupportedError) {
-        console.warn('[chain] host does not serve Asset Hub; sync stopped for this session')
-        return
-      }
-      // Assume the worst (a dead socket) and rebuild: destroying costs one
-      // reconnect, while reusing a wedged client hangs every later poll.
+      // Every failure retries — including a host refusing Asset Hub
+      // (ChainNotSupportedError): sockets are never a production fallback,
+      // so retrying the probe is the only route back, and a host build
+      // gaining the chain is picked up by it. Assume the worst (a dead
+      // connection) and rebuild: destroying costs one reconnect, while
+      // reusing a wedged client hangs every later poll.
       destroyClients()
       timer = window.setTimeout(() => { void poll() }, backoff)
       backoff = Math.min(backoff * 2, BACKOFF_MAX_MS)
