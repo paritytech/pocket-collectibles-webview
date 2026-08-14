@@ -1,5 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { sendFlowEvent } from '../bridge/send'
+import { sendFlowEvent } from '../host/send'
 
 interface Props { children: ReactNode }
 interface State { hasError: boolean }

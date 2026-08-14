@@ -10,18 +10,20 @@ import {
   subscribeCollection,
   hasDelivered,
   getCollectionGeneration,
-  getDroppedCount
-} from './bridge/collection'
-import { sendFlowEvent } from './bridge/send'
-import { isEmbedded } from './bridge/embed'
+  getDroppedCount,
+  deliverCollection
+} from './collection/store'
+import { sendFlowEvent } from './host/send'
+import { isEmbedded } from './host/embed'
 import { stopChainSync } from './chain/start'
-import type { CollectionInput, OwnedNft } from './bridge/types'
+import { subscribeChainSyncStatus, type ChainSyncStatus } from './chain/status'
+import type { CollectionInput, OwnedNft } from './collection/types'
 import { buildEntries, type CollectibleEntry } from './collectibles/format'
 import { DEV_MOCKS, findMock } from './devMocks'
 
-// If native never delivers a collection, stop waiting after this long rather
-// than spinning forever (offline / silent host). What shows then depends on
-// the last-known-good cache (bridge/collectionCache.ts): a cached collection
+// If no collection arrives, stop waiting after this long rather than
+// spinning forever (offline / silent host). What shows then depends on
+// the last-known-good cache (collection/cache.ts): a cached collection
 // renders immediately — no boot screen at all — so this timeout only gates
 // the first-ever (or storage-blocked) boot, which falls to the empty state.
 const BOOT_TIMEOUT_MS = 8_000
@@ -42,13 +44,14 @@ export default function App() {
   const [displayName, setDisplayName] = useState<string | undefined>(initial.displayName)
   const [delivered, setDelivered] = useState<boolean>(hasDelivered())
   const [bootTimedOut, setBootTimedOut] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<ChainSyncStatus>('idle')
   const [selection, setSelection] = useState<Selection | null>(null)
   // First-run intro — shown once over the first populated gallery view.
   const [showIntro, setShowIntro] = useState(false)
   const introChecked = useRef(false)
-  // Remount key for the gallery: bumps only on a wholesale setCollection
-  // (new scenario / dev mock), so the entrance — count-up included —
-  // replays. Incremental pushNft streaming leaves it untouched.
+  // Remount key for the gallery: bumps only when a delivery changes the
+  // item set (new scenario / dev mock), so the entrance — count-up
+  // included — replays; same-content refreshes leave it untouched.
   const [collectionGen, setCollectionGen] = useState<number>(getCollectionGeneration())
 
   const particleRef = useRef<ParticleCanvasApi>(null)
@@ -66,7 +69,7 @@ export default function App() {
   const entriesRef = useRef(entries)
   entriesRef.current = entries
 
-  // Subscribe to native collection deliveries (initial + late + streamed).
+  // Subscribe to collection deliveries (cache seed + chain polls + mocks).
   useEffect(() => {
     const off = subscribeCollection((next) => {
       setItems(next)
@@ -102,9 +105,12 @@ export default function App() {
     if (!param) return
     const mock = findMock(param)
     if (!mock) return
-    const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
-    w.setCollection?.(mock.build())
+    deliverCollection(mock.build())
   }, [])
+
+  // Chain-sync health, so an empty shelf caused by a connection failure
+  // reads as one (the loop keeps retrying underneath).
+  useEffect(() => subscribeChainSyncStatus(setSyncStatus), [])
 
   // Tag <body> when embedded so CSS flattens the desktop phone frame.
   useEffect(() => {
@@ -154,8 +160,8 @@ export default function App() {
   }, [delivered])
 
   // flow.gallery_shown — fired once, the first time the populated gallery is
-  // shown. Deferred one frame so a burst of pushNft items arriving in the
-  // same tick as the first render is counted (the bridge coalesces notifies
+  // shown. Deferred one frame so a burst of deliveries arriving in the
+  // same tick as the first render is counted (the store coalesces notifies
   // into a microtask; a frame lands safely after), and reports the LIVE count
   // via entriesRef rather than a value captured at the gallery's mount —
   // which undercounted while items were still streaming.
@@ -222,22 +228,24 @@ export default function App() {
     sendFlowEvent({ type: 'flow.item_opened', hash: hash.startsWith('0x') ? hash : `0x${hash}` })
   }
 
-  // Dev helper: load a mock collection via the registered native global.
-  // setCollection replaces the store wholesale and notifies subscribers, so
-  // no resetCollection() is needed here — and calling it would be wrong, as
-  // it clears the listener set (including this component's own subscription).
+  // Dev helper: load a mock collection. deliverCollection replaces the
+  // store wholesale and notifies subscribers, so no resetCollection() is
+  // needed here — and calling it would be wrong, as it clears the listener
+  // set (including this component's own subscription).
   function loadMock(build: () => CollectionInput): void {
     // Chain sync would clobber the mock on its next poll — stop it for the
     // rest of the session (a ?mock= boot never starts it in the first place).
     stopChainSync()
     setSelection(null)
-    const w = window as unknown as { setCollection?: (i: CollectionInput) => void }
-    w.setCollection?.(build())
+    deliverCollection(build())
   }
 
   // Boot screen only while there's nothing to show: cache-seeded entries
   // render at once even though native hasn't spoken yet.
   const showBoot = !delivered && !bootTimedOut && entries.length === 0
+  // Connection trouble only replaces the EMPTY state — a shelf with items
+  // (cached or delivered) keeps showing them while the loop retries.
+  const showSyncError = !showBoot && entries.length === 0 && syncStatus === 'error'
 
   return (
     <div className="page">
@@ -249,7 +257,14 @@ export default function App() {
             <div className="boot-copy">Opening your collection…</div>
           </div>
         )}
-        {!showBoot && entries.length === 0 && <EmptyGallery {...(displayName ? { displayName } : {})} />}
+        {showSyncError && (
+          <div className="sync-error-screen" role="alert">
+            <div className="sync-error-mark" aria-hidden="true">◈</div>
+            <div className="sync-error-title">Can&rsquo;t reach your collection</div>
+            <div className="sync-error-copy">Reconnecting&hellip;</div>
+          </div>
+        )}
+        {!showBoot && !showSyncError && entries.length === 0 && <EmptyGallery {...(displayName ? { displayName } : {})} />}
         {!showBoot && entries.length > 0 && (
           <GalleryScreen
             key={collectionGen}

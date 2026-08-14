@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.3.0",
+    "@parity/product-sdk-chain-client": "^0.10.0",
+    "@parity/product-sdk-host": "^0.15.1",
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-labs/hdkd": "^0.0.29",
     "@polkadot-labs/hdkd-helpers": "^0.0.31",
@@ -26,6 +28,9 @@
     "polkadot-api": "^2.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
+  },
+  "overrides": {
+    "@polkadot-api/json-rpc-provider": "^0.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

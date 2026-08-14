@@ -1,8 +1,8 @@
 // Mock CollectionInput shapes used by the ?dev=1 panel. Each variant
-// exercises a distinct gallery state. In production, native delivers the
-// real owned set via window.setCollection / window.pushNft.
+// exercises a distinct gallery state. In production, the chain sync
+// delivers the real owned set (src/chain/start.ts).
 
-import type { CollectionInput, OwnedNft } from './bridge/types'
+import type { CollectionInput, OwnedNft } from './collection/types'
 
 /** A realistic native-shape NFT hash: 64 lowercase hex chars (32 bytes).
  *  The resolver consumes the first 4 bytes for rarity + image pick, so a
@@ -59,7 +59,7 @@ const DAY = 86_400 // seconds
 /** Build `count` owned NFTs spread across recent "games" of ~10 items each.
  *  Every item in a game shares ONE exact `mintedAt`, mirroring production —
  *  a game's NFTs are minted together, so they carry the same on-chain
- *  per-game timestamp (per the bridge contract). */
+ *  per-game timestamp (per the store contract). */
 function buildOwned(count: number, rareEvery: number = 7): OwnedNft[] {
   const now = Math.floor(Date.now() / 1000)
   const out: OwnedNft[] = []

@@ -175,6 +175,25 @@ button {
   50%      { opacity: 1; transform: scale(1.1); }
 }
 
+/* ---------- Chain-sync error (empty shelf + connection down) ---------- */
+.sync-error-screen {
+  position: absolute; inset: 0;
+  display: grid; place-items: center; align-content: center; gap: 14px;
+  padding: 32px; color: var(--ink-2); text-align: center; z-index: 2;
+}
+.sync-error-mark {
+  font-size: 40px; color: var(--ink-3);
+  animation: bootPulse 2.6s ease-in-out infinite;
+}
+.sync-error-title {
+  font-family: var(--font-title); font-size: 18px;
+  color: var(--ink-1);
+}
+.sync-error-copy {
+  font-family: var(--font-ui); font-size: 12px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+
 /* ---------- Fatal error fallback (ErrorBoundary) ---------- */
 .fatal-screen {
   position: fixed; inset: 0;

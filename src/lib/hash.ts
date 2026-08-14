@@ -1,4 +1,4 @@
-// Hash-identity helpers shared by the chain layer, the bridge store and
+// Hash-identity helpers shared by the chain layer, the collection store and
 // the view models. One definition of "normalized hash" — before this,
 // four hand-rolled copies (regex vs prefix-pair vs trim variants) had
 // already drifted, and a mismatch between any two turns into "credit

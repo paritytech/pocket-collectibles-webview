@@ -77,9 +77,7 @@ function isSamePlayer(
 /** Credits of one ROOTED award block, via the proofs runtime API.
  *  Falls back to [] on pruned/errored blocks. Note for Phase 2: the same
  *  API hands out ready-made inclusion proofs — the claim builder should
- *  re-fetch at claim time rather than cache across polls (a cache here
- *  was removed 2026-08-12: unbounded, uncalled, and mis-keyed vs the
- *  store's normalized hashes). */
+ *  re-fetch at claim time rather than cache across polls. */
 async function creditsOfRootedBlock(
   api: PeopleApi,
   who: Claimant,

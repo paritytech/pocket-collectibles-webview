@@ -13,7 +13,7 @@
 // instance -> item -> collection (most specific wins).
 
 import { Binary, Enum } from 'polkadot-api'
-import type { OwnedNft } from '../../bridge/types'
+import type { OwnedNft } from '../../collection/types'
 import type { AssetHubApi } from '../client'
 
 /** Metadata key convention carrying the 32-byte identity hash. */
@@ -154,14 +154,5 @@ export async function fetchOwnedAt(api: AssetHubApi, addresses: string[]): Promi
     reads[p.pos] = { occupied: true, item }
   })
   return reads
-}
-
-/** Read the owned set for a list of purse addresses and map it into the
- *  gallery's bridge shape, resolving identity hash + display name +
- *  artwork per item. Addresses holding nothing are skipped; items missing
- *  the "hash" metadata are skipped with a warning (they cannot be keyed). */
-export async function fetchOwned(api: AssetHubApi, addresses: string[]): Promise<OwnedNft[]> {
-  const reads = await fetchOwnedAt(api, addresses)
-  return reads.map((r) => r.item).filter((o): o is OwnedNft => o !== null)
 }
 

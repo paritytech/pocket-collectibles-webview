@@ -1,12 +1,12 @@
-// Last-known-good collection cache — webview-only (no native dependency).
+// Last-known-good collection cache — webview-only.
 //
-// Native owns the truth: it reads the owned set from the chain and pushes it
-// over the bridge. When it can't (offline, RPC timeout, silent host), the
-// webview used to fall back to the empty state after the boot timeout —
-// telling a collector with a full Pocket "No collectibles yet". Instead we
-// persist the most recent delivered snapshot to localStorage and seed the
-// collection store from it at boot, so the gallery renders the last-known
-// collection immediately; any live delivery replaces it wholesale.
+// The chain sync owns the truth. When no poll can land (offline, RPC
+// timeout, a host that serves no chains), the webview used to fall back to
+// the empty state after the boot timeout — telling a collector with a full
+// Pocket "No collectibles yet". Instead we persist the most recent
+// delivered snapshot to localStorage and seed the collection store from it
+// at boot, so the gallery renders the last-known collection immediately;
+// any live delivery replaces it wholesale.
 //
 // Same resilient pattern as firstRun.ts: wrapped in try/catch because some
 // WebView configurations block storage — in that case there's simply no
@@ -14,22 +14,20 @@
 
 import type { OwnedNft } from './types'
 import { currentIdentity } from '../chain/identity'
-import { currentAddresses } from '../chain/accounts'
 
 const KEY = 'pkt_collection_cache_v1'
 
-/** Whose shelf the store currently describes: the player identity plus the
- *  explicit address list, canonicalized. A cached snapshot is only valid
- *  for the inputs that produced it — seeding another player's shelf and
- *  waiting for the poll to correct it reads as "the player param does
- *  nothing" (and in a host would briefly show someone else's collection).
- *  Callers snapshot this AT DELIVERY TIME (bridge/collection.ts) — never
- *  at cache-write time, which is microtask-deferred and could already
- *  belong to a different player. */
+/** Whose shelf the store currently describes: the player identity,
+ *  canonicalized. A cached snapshot is only valid for the identity that
+ *  produced it — seeding another player's shelf and waiting for the poll
+ *  to correct it reads as "the player param does nothing" (and in a host
+ *  would briefly show someone else's collection). Callers snapshot this
+ *  AT DELIVERY TIME — never at cache-write time, which is
+ *  microtask-deferred and could already belong to a different player. */
 export function shelfScope(): string {
   const id = currentIdentity()
   const idPart = id ? (id.kind === 'account' ? `a:${id.address}` : `p:${id.alias}`) : ''
-  return `${idPart}|${currentAddresses().slice().sort().join(',')}`
+  return `${idPart}|`
 }
 
 // Never persist under the dev panel / URL mocks — a mock collection written

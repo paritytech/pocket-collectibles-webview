@@ -1,7 +1,7 @@
 // View-model helpers: turn raw OwnedNft data into the shape the gallery
 // renders, plus hash/date formatting and sorting.
 
-import type { OwnedNft } from '../bridge/types'
+import type { OwnedNft } from '../collection/types'
 import { normalizeHash, shortCode } from '../lib/hash'
 import { chainCollectible, type ResolvedCollectible } from './resolver'
 

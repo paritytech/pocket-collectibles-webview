@@ -1,17 +1,5 @@
-// Native bridge contract — single source of truth for all data crossing
-// the webview boundary for the Collectibles catalogue.
-//
-// This mirrors the game-results webview's bridge conventions
-// (buffer-or-deliver globals, web→native flow events) but carries a
-// different payload: the user's *owned* collectibles rather than a
-// single game's results.
-//
-// Lifecycle: native sets window.__COLLECTION__ before the webview
-// finishes loading, OR calls window.setCollection(input) at any point
-// after. It MAY also stream individual items in via window.pushNft(...)
-// (useful when the owned set is large or arrives incrementally from the
-// chain). All three paths converge on the same React state — see
-// src/bridge/collection.ts.
+// Data contract of the collection store — the shapes every delivery
+// (chain sync, cache seed, dev mocks) uses.
 
 /** A single collectible the user owns.
  *
@@ -68,21 +56,3 @@ export interface CollectionInput {
    *  native should sanitize. */
   displayName?: string
 }
-
-// Web→native events. Native may ignore any of these; they exist for
-// telemetry, native chrome (e.g. a back button), and lifecycle.
-export type FlowEvent =
-  /** Fired once after first paint — the webview is alive and listening. */
-  | { type: 'flow.ready' }
-  /** The gallery has mounted and run its entrance. */
-  | { type: 'flow.gallery_shown'; count: number }
-  /** User opened a collectible's detail view. */
-  | { type: 'flow.item_opened'; hash: string }
-  /** User closed the detail view, back to the gallery. */
-  | { type: 'flow.item_closed'; hash: string }
-  /** Webview-side error worth surfacing for telemetry. `phase` identifies
-   *  the area (e.g. 'boot_timeout', 'assets'); `detail` is optional. */
-  | { type: 'flow.error'; phase: string; detail?: string }
-  /** User asked to dismiss the webview (e.g. tapped the close affordance).
-   *  Native should tear down the WebView. */
-  | { type: 'flow.close' }
