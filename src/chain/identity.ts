@@ -99,8 +99,10 @@ export async function initIdentity(): Promise<void> {
         set({ account: address }, { persist: false })
         return
       }
-      // No product-account capability in this host (today's hosts) — fall
-      // through to the dev resolution, the TEMPORARY stand-in.
+      // No product account for this DotNS id (a placeholder, dependency #1)
+      // or a host that doesn't serve it — fall through to the dev resolution,
+      // the TEMPORARY stand-in. Shipping hosts (iOS, desktop) DO implement
+      // product accounts; this is gated on registering the real id.
     } catch (err) {
       console.warn('[chain] host identity resolution failed', err)
       return

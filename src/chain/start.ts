@@ -32,7 +32,9 @@ import { setChainSyncStatus } from './status'
 import { fetchOwnedAt } from './pallets/scarcity'
 import { fetchCredits, type Credit } from './pallets/credits'
 import { fetchClaimStates, type ClaimState } from './pallets/claims'
-import { getIdentitySource, type PlayerIdentity } from './identity'
+import { getIdentitySource, currentIdentity, type PlayerIdentity } from './identity'
+import { getSigner } from './signing'
+import { submitClaim, type ClaimParams, type ClaimResult, type ClaimStatus } from './claim'
 import { hasDevOverride } from './devIdentity'
 import { devRootPathOf } from './derive'
 import { hostPurseSource, type PurseSource } from './purses'
@@ -64,6 +66,10 @@ let unsubscribers: (() => void)[] = []
 // Bumped on every stop/input change so an in-flight fetch that resolves
 // late can tell it's stale and drop its result.
 let generation = 0
+// The running loop's restart(), exposed so a finished claim can force an
+// immediate re-poll (the minted item then appears unwrapped without waiting
+// out the 30s cycle). Null when the sync isn't running.
+let triggerPoll: (() => void) | null = null
 
 /** Owned items win over credits with the same hash; unminted credits
  *  render as wrapped (`pending`), Claimable ones flagged for Phase 2's
@@ -86,7 +92,10 @@ function mergeShelf(
       hash: credit.hash,
       pending: true,
       ...(state === 'claimable' ? { claimable: true } : {}),
-      ...(credit.awardedAt !== undefined ? { mintedAt: credit.awardedAt } : {})
+      ...(credit.awardedAt !== undefined ? { mintedAt: credit.awardedAt } : {}),
+      // Carried so the mint flow can re-fetch this credit's inclusion proof
+      // at claim time (chain/claim.ts) without another shelf lookup.
+      ...(credit.awardBlock !== undefined ? { awardBlock: credit.awardBlock } : {})
     })
   }
   return [...owned, ...earned]
@@ -247,6 +256,7 @@ export function startChainSync(): void {
     if (identity || isInContainer || !isEmbedded) void poll()
   }
 
+  triggerPoll = restart
   unsubscribers = [
     getIdentitySource().subscribe((next) => {
       identity = next
@@ -255,12 +265,40 @@ export function startChainSync(): void {
   ]
 }
 
+/** Force an immediate re-poll (e.g. right after a successful claim) so the
+ *  shelf reflects the new on-chain state without waiting out the refresh
+ *  interval. No-op when the sync isn't running. */
+export function refreshChainSync(): void {
+  triggerPoll?.()
+}
+
+/** Spend a claimable credit: gather this session's connection, identity,
+ *  signer, and purse subtree, submit the claim (chain/claim.ts), and on
+ *  success force an immediate re-poll so the minted item appears unwrapped.
+ *  Resolves with the outcome; never rejects. */
+export async function claimCredit(
+  params: ClaimParams,
+  onStatus: (status: ClaimStatus) => void
+): Promise<ClaimResult> {
+  const identity = currentIdentity()
+  if (!identity) return { ok: false, error: 'no player identity to claim as' }
+  const apis = await getChainApis()
+  if (!apis) return { ok: false, error: 'no chain connection this session' }
+  const signer = await getSigner(identity)
+  if (!signer) return { ok: false, error: 'this session cannot sign a claim' }
+  const source = await purseSourceOf(identity)
+  const result = await submitClaim(apis, identity, source, params, signer, onStatus)
+  if (result.ok) refreshChainSync()
+  return result
+}
+
 /** Tear the sync down (dev panel loading a mock, tests). Safe to call
  *  when never started. */
 export function stopChainSync(): void {
   if (!running) return
   running = false
   generation++
+  triggerPoll = null
   if (timer !== undefined) window.clearTimeout(timer)
   for (const off of unsubscribers) off()
   unsubscribers = []

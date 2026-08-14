@@ -107,6 +107,47 @@ async function creditsOfRootedBlock(
   return credits
 }
 
+/** The typed inclusion-proof entry `nft_claim_credit_proofs` returns. */
+type ProofEntry = Extract<
+  Awaited<ReturnType<PeopleApi['apis']['NftCreditsApi']['nft_claim_credit_proofs']>>,
+  { success: true }
+>['value'][number]
+
+/** The proof material a claim spends one credit with — the credit, its leaf
+ *  index, and the sibling hashes, each already the type `NftClaims.claim`
+ *  takes (chain/claim.ts). */
+export interface ClaimProof {
+  credit: ProofEntry['credit']
+  leafIndex: number
+  proof: ProofEntry['proof']
+}
+
+/** The live inclusion proof for one credit, re-fetched at claim time (proofs
+ *  are deliberately not cached across polls — the tree can still be
+ *  finalising). Null when this block holds no such credit for the player:
+ *  already claimed, pruned, or never awarded. */
+export async function fetchClaimProof(
+  api: PeopleApi,
+  identity: PlayerIdentity,
+  awardBlock: number,
+  creditHash: string
+): Promise<ClaimProof | null> {
+  const who = ownerKey(identity)
+  const result = await api.apis.NftCreditsApi.nft_claim_credit_proofs(awardBlock, who, AT)
+  if (!result.success) {
+    console.warn(`[chain] no proofs for award block ${awardBlock}:`, result.value?.type)
+    return null
+  }
+  const lower = creditHash.toLowerCase()
+  const target = lower.startsWith('0x') ? lower : `0x${lower}`
+  for (const entry of result.value) {
+    if (entry.credit.toLowerCase() === target) {
+      return { credit: entry.credit, leafIndex: entry.leaf_index, proof: entry.proof }
+    }
+  }
+  return null
+}
+
 /** Credits of ROOTLESS award blocks (usually just the current block),
  *  read from the awards buffer so fresh earnings show within seconds. */
 async function creditsOfRootlessBlock(

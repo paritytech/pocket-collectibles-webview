@@ -19,6 +19,7 @@
 // web-demo uses).
 
 import { Binary } from 'polkadot-api'
+import { getPolkadotSigner, type PolkadotSigner } from 'polkadot-api/signer'
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd'
 import { DEV_PHRASE, entropyToMiniSecret, mnemonicToEntropy, ss58Address } from '@polkadot-labs/hdkd-helpers'
 import { pubkeyHexOf } from './ss58'
@@ -37,8 +38,9 @@ export type KeyAtIndex = (index: number) => Uint8Array
 // address, every poll. This is also the ONE construction site to swap
 // when the host's key capability (dependency #5) replaces in-page
 // derivation.
-let deriver: ((path: string) => { publicKey: Uint8Array }) | null = null
-function devDerive(path: string): { publicKey: Uint8Array } {
+type DevKeyPair = { publicKey: Uint8Array; sign: (message: Uint8Array) => Uint8Array }
+let deriver: ((path: string) => DevKeyPair) | null = null
+function devDerive(path: string): DevKeyPair {
   if (!deriver) deriver = sr25519CreateDerive(entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE)))
   return deriver(path)
 }
@@ -98,6 +100,20 @@ const ALL_DEV_NAMES = [
   'Quentin', 'Rupert', 'Sybil', 'Trent', 'Ursula', 'Victor', 'Walter',
   'Xavier', 'Yvonne', 'Zack'
 ]
+
+/** DEV/QA ONLY: a PolkadotSigner for a dev-held account (the bare dev
+ *  player or a roster name), or null when `address` isn't one we hold a
+ *  secret for. The signer of the mint flow's claimant origin — keys derive
+ *  in-page from the public DEV_PHRASE, so this is testnet-only by
+ *  construction, and a real host product-account address (not dev-derivable)
+ *  yields null, keeping the mint action hidden. Production signing comes
+ *  from the host instead (signing.ts, dependency #5). */
+export function devSignerForAddress(address: string): PolkadotSigner | null {
+  const path = devRootPathOf(address)
+  if (path === null) return null
+  const { publicKey, sign } = devDerive(path)
+  return getPolkadotSigner(publicKey, 'Sr25519', (input) => sign(input))
+}
 
 /** Dev-only: which dev-held root an address belongs to — '' for the bare
  *  dev player, '//Bob' for roster roots — or null when it is nobody we

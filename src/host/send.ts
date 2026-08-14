@@ -20,6 +20,14 @@ export type FlowEvent =
   /** Webview-side error worth surfacing for telemetry. `phase` identifies
    *  the area (e.g. 'boot_timeout', 'assets'); `detail` is optional. */
   | { type: 'flow.error'; phase: string; detail?: string }
+  /** User opened the mint flow for a claimable credit. */
+  | { type: 'flow.mint_opened'; hash: string }
+  /** A collection's preview was shown for the credit. */
+  | { type: 'flow.mint_previewed'; hash: string; collection: number }
+  /** User confirmed and the claim was submitted. */
+  | { type: 'flow.mint_submitted'; hash: string; collection: number }
+  /** The claim finalised — `success` false carries a `detail` reason. */
+  | { type: 'flow.mint_result'; hash: string; success: boolean; detail?: string }
   /** User asked to dismiss the webview (e.g. tapped the close affordance).
    *  The host should tear down the WebView. */
   | { type: 'flow.close' }

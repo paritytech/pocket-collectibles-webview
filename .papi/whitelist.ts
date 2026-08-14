@@ -12,17 +12,22 @@ import type {
 
 export const whitelist: (GamingnetAssetHubWhitelistEntry | GamingnetPeopleWhitelistEntry)[] = [
   // Asset Hub: owned items + all three metadata layers in one batched
-  // runtime call (pallets/scarcity.ts)
+  // runtime call (pallets/scarcity.ts). metadata_batch also serves the
+  // mint flow's Item/Collection preview metadata (pallets/preview.ts,
+  // pallets/minters.ts).
   'query.Scarcity.NftsByOwner',
   'api.ScarcityApi.metadata_batch',
   // Asset Hub: claim state (pallets/claims.ts)
   'query.NftClaims.CreditTrees',
   'query.NftClaims.ClaimedCredits',
-  // Asset Hub: Phase-2 staging, no reader yet — the claim flow's
-  // collection picker needs the registered collections and their item
-  // counts (kept whitelisted so the descriptors are ready).
+  // Asset Hub: the mint flow — the collection picker reads the registered
+  // collections (pallets/minters.ts), the preview asks the runtime what a
+  // credit would mint into each (api NftClaimsApi.preview_mints,
+  // pallets/preview.ts), and the claim spends the credit (chain/claim.ts).
   'query.NftClaims.CollectionMinters',
   'query.Scarcity.Collections',
+  'api.NftClaimsApi.preview_mints',
+  'tx.NftClaims.claim',
   // People Chain: earned credits + proofs (pallets/credits.ts)
   'query.NftCredits.NftClaimCreditBlocks',
   'query.NftCredits.NftClaimCreditAwards',

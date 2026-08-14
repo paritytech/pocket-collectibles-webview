@@ -89,6 +89,9 @@ Flow:
 1. The host loads `index.html` in its webview/container.
 2. The webview resolves the player (product account 0), scans the purse
    subtree, reads credits, and renders — polling every 30 s.
+   A claimable credit's detail view offers **Mint**: the player picks a
+   collection, sees a blurred preview of the exact item that would mint,
+   and confirms — the webview submits `NftClaims.claim` (§7).
 3. The gallery mounts and runs its entrance → `flow.gallery_shown`.
 4. User taps a collectible → detail view (`flow.item_opened`), swipes
    between items, closes back to the gallery (`flow.item_closed`).
@@ -236,18 +239,41 @@ notch / home indicator.
 
 ---
 
-## 7. Out of Scope (Future)
+## 7. Minting (claiming credits)
+
+A claimable credit is spent by submitting `NftClaims.claim` — the webview's
+only write. The player picks a registered collection
+(`NftClaims.CollectionMinters`), the runtime previews the exact item
+(`NftClaimsApi.preview_mints`; Random selection is deterministic, so the
+blurred preview IS the mint), and on confirm the webview re-fetches the
+inclusion proof, mints into the player's first empty purse, and watches the
+tx to finality before refreshing the shelf.
+
+**Host requirement — signing.** The claim is signed by the claimant (the
+player's account). In a container this is the host signing as the product
+account, via the SDK accounts provider's `getProductAccountSigner` — which the
+**iOS and desktop apps implement** (the Polkadot Browser host we first probed
+did not). What gates it for this product is a **registered DotNS product id**
+(dependency #1): the host derives the account from that id's subtree, and ours
+is still a placeholder. Until it's registered, a container falls back to the
+dev DEV_PHRASE signer as a TEMPORARY stand-in, and a session that still can't
+sign hides the Mint action. Person/alias claims (dependency #2/#3) are not
+built — the claimant kind is always `Account`.
+
+---
+
+## 8. Out of Scope (Future)
 
 - A "full collection with locked slots" / completion-% mode (current
   design is owned-only).
-- Phase 2: claiming Claimable credits from the shelf (tx signing via the
-  SDK's signer — will add host requirements when it lands).
+- Person/alias claims (`ClaimantKind::Person`) — the mint flow claims as
+  `Account` only (dependency #2/#3).
 - Sharing a collectible out (image export / deep link).
 - A web-side dismiss button emitting `flow.close`.
 
 ---
 
-## 8. Test Scenarios (no host required)
+## 9. Test Scenarios (no host required)
 
 Outside any host, the webview falls back to direct WebSockets to the
 gamingnet testnet and in-page DEV_PHRASE key derivation. Append query
@@ -267,7 +293,7 @@ RPC + genesis (see `docs/READ_PATH.md`).
 
 ---
 
-## 9. Versioning Note
+## 10. Versioning Note
 
 This contract is intentionally small: a product-sdk container serving two
 chains + product accounts in, six event types out. If a future build needs

@@ -22,6 +22,12 @@ export interface CollectibleEntry {
   mintedAt?: number
   /** True for staged candidates not yet finalised on-chain. */
   pending: boolean
+  /** True for a pending credit whose root is on Asset Hub and whose leaf is
+   *  unclaimed — a claim would mint it (the mint flow's entry condition). */
+  claimable?: boolean
+  /** For a claimable credit, the People-chain block it was awarded in — the
+   *  mint flow needs it to re-fetch the inclusion proof at claim time. */
+  awardBlock?: number
   /** Resolved art + rarity + name. */
   resolved: ResolvedCollectible
   /** Number of owned items that resolve to this same asset (≥1). Set by
@@ -87,6 +93,8 @@ export function buildEntry(nft: OwnedNft): CollectibleEntry {
     resolved
   }
   if (typeof nft.mintedAt === 'number') entry.mintedAt = nft.mintedAt
+  if (nft.claimable === true) entry.claimable = true
+  if (typeof nft.awardBlock === 'number') entry.awardBlock = nft.awardBlock
   return entry
 }
 
