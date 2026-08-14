@@ -1,42 +1,22 @@
-// The account deriver: turns the purse convention into addresses.
+// The DEV-ONLY account deriver: turns the purse convention into
+// addresses. Inside a host container, purse addresses come from
+// host-derived product accounts instead (purses.ts) — this module serves
+// plain-browser sessions.
 //
-/*
-* TEMPORARY SOLUTION TO OPEN QUESTION
-* DEPENDENCY #5
-* https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
-*
-* The derivation path convention below is our own interim decision, and
-* the in-page DEV_PHRASE key source stands in for the host's
-* public-key-at-an-index capability, which has no implementation yet.
-*
-*/
-//
-// CONVENTION (interim, NOT platform-ratified — open dependency #5 in
-// DEPENDENCIES.md): the player's i-th collectible purse is derived from
-// their root key at
+// CONVENTION (dependency #5 in DEPENDENCIES.md): the player's i-th
+// collectible purse is derived from their root key at
 //
 //     //nft//<i>                           (sr25519 hard derivation)
 //
-// This is the retreat scarcity-tools web-demo's convention, adopted
-// 2026-08-11 (replacing our 2026-08-07 `//product//scarcity//nft//<i>`)
-// so both in-house minting surfaces target the same purses — items the
+// This is the retreat scarcity-tools web-demo's convention, adopted so
+// both in-house minting surfaces target the same purses — items the
 // retreat pipeline claims land where this shelf scans. If the platform
 // ratifies a different rule, pursePath() is the only line that changes.
 //
-// Key material: the page holds no secrets (design doc §3.7), so the
-// deriver works through a `KeyAtIndex` capability that yields PUBLIC keys
-// only:
-//   - production: the host must supply "a public key at an index" — a
-//     documented Phase-1 read capability that has NO host implementation
-//     yet; when the bridge exists it slots in here.
-//   - dev (not embedded): keys derive in-page from DEV_PHRASE, the public
-//     Substrate dev mnemonic — testnet-only by construction, and the same
-//     root the scarcity-tools web-demo uses.
-//
-// Scan policy (also ours, undocumented anywhere): derive a fixed window
-// of indexes and hand them all to the reader — NftsByOwner reads are
-// batched, so a window costs one round trip and empty purses simply
-// return nothing. Gap-limit scanning can replace this if windows get big.
+// Key material: the page holds no secrets (design doc §3.7) — keys derive
+// in-page from DEV_PHRASE, the public Substrate dev mnemonic, so they are
+// testnet-only by construction (the same roots the scarcity-tools
+// web-demo uses).
 
 import { Binary } from 'polkadot-api'
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd'

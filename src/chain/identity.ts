@@ -9,30 +9,32 @@
  *   PERMANENT — the PlayerIdentity type (mirrors the pallet's
  *   `AccountOrPerson`, chain reality), the validation gate, and the
  *   IdentitySource subscription every consumer reads through.
- *   MISSING   — the authoritative resolution ("call host capability X" /
- *   "derive it as Y"): that is what dependency #2/#3 will supply, as one
- *   new branch in takeInitial().
- *   TEMPORARY — everything currently feeding the seam (see markers).
+ *   CONTAINER — inside a product-sdk host the player IS the product
+ *   account at derivation index 0 (host-derived, shared with the purse
+ *   scan via purses.ts). Whether the award pipeline credits this account
+ *   or a person ALIAS instead is still open (dependency #2/#3) — if it is
+ *   the alias, this branch swaps to getProductAccountAlias.
+ *   TEMPORARY — the dev inputs feeding the seam outside a container
+ *   (see markers).
  *
  * The credit map is keyed by the pallet's `AccountOrPerson`: an
  * ordinary account, or an alias (32-byte person id) for players known
- * through proof-of-personhood. This module isolates it the same way
- * accounts.ts isolates the purse-address convention.
+ * through proof-of-personhood.
  *
- * Resolution order at load:
- *   1. ?player=<ss58 | dev name (bob, …)>   or   ?alias=<0x + 64 hex>
- *      — dev/QA; persisted
- *   2. window.__PLAYER__ = { account } | { alias } set before our JS ran
- *   3. the identity persisted by a previous session
- * At any later point native may call window.setPlayerIdentity({...})
- * (buffer-or-deliver: registered at module load). Pass null to clear.
+ * Resolution, via initIdentity() at boot:
+ *   1. ?player=<ss58 | dev name (bob, …)> or ?alias=<0x+64hex> — an
+ *      explicit QA override, honoured in EVERY mode (inside a host too).
+ *   2. container — product account 0.
+ *   3. dev — the identity a previous session persisted.
 */
 
-import { isEmbedded } from '../bridge/embed'
+import { isEmbedded, isInContainer } from '../host/embed'
 import { createObservable } from '../lib/observable'
 import { readJson, writeJson, removeKey } from '../lib/storage'
+import { withDeadline } from '../lib/deadline'
 import { isValidSs58 } from './ss58'
 import { devAddressOf } from './derive'
+import { hostPurseSource } from './purses'
 
 export type PlayerIdentity =
   | { kind: 'account'; address: string }
@@ -55,9 +57,10 @@ function parseIdentity(raw: unknown): PlayerIdentity | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   if (typeof o.account === 'string') {
-    // Dev names (bob, alice, …) expand to their DEV_PHRASE addresses —
-    // a dev affordance, never inside a host, real addresses pass through.
-    const address = (!isEmbedded && devAddressOf(o.account)) || o.account.trim()
+    // Dev names (bob, alice, …) expand to their DEV_PHRASE addresses.
+    // Inside a host only an explicit ?player= override unlocks this;
+    // real addresses pass through untouched.
+    const address = ((!isEmbedded || devOverride) && devAddressOf(o.account)) || o.account.trim()
     if (isValidSs58(address)) return { kind: 'account', address }
     console.warn('[chain] dropping invalid player account (need SS58 or a dev name)', address)
     return null
@@ -91,47 +94,69 @@ function set(raw: unknown, opts: { persist: boolean }): void {
   identity.set(next)
 }
 
-// ---- Globals registered at module load ----------------------------------
+// ---- Resolution, called once from the boot sequence ----------------------
 
-// May graduate to permanent: a native-pushed identity is a plausible
-// production answer to dependency #2/#3, in which case this entry point
-// stays and only the dev inputs below go.
-;(window as unknown as Record<string, unknown>).setPlayerIdentity = (raw: unknown) => {
-  set(raw, { persist: false })
+// True when the session's identity came from an explicit URL param — a
+// QA affordance that outranks the container's own resolution and lets
+// the purse scan / connection layer relax their production rules.
+let devOverride = false
+
+/** Whether an explicit ?player=/?alias= override drives this session. */
+export function hasDevOverride(): boolean {
+  return devOverride
 }
 
-;(function takeInitial(): void {
+/** Resolve who the player is. URL params win everywhere (QA override,
+ *  works inside a host too). Otherwise a container asks the host for
+ *  product account 0 (also purse 0 — same memoized source the scan
+ *  uses); on failure the identity stays null and the boot-timeout path
+ *  reports it. Dev falls back to the last persisted identity. Never
+ *  rejects. */
+export async function initIdentity(): Promise<void> {
   try {
     /*
     * TEMPORARY SOLUTION TO OPEN QUESTION
     * DEPENDENCY #2/#3
     * https://github.com/paritytech/scarcity-spa/blob/main/docs/DEPENDENCIES.md
     *
-    * Every branch below injects an identity from outside because the module cannot
-    * yet resolve one itself. The authoritative branch ("ask host capability X" /
-    * "derive as Y") lands here when the platform answers; the URL params and
-    * __PLAYER__ then demote to dev-only.
+    * QA sessions inject an identity from outside. Whether the container
+    * answer below (product account 0) is also what the award pipeline
+    * credits — or a person alias is — decides how these age.
     *
     */
     const params = new URLSearchParams(window.location.search)
     const player = params.get('player')
     if (player) {
-      set({ account: player }, { persist: true })
+      devOverride = true
+      set({ account: player }, { persist: !isInContainer })
       return
     }
     const alias = params.get('alias')
     if (alias) {
-      set({ alias }, { persist: true })
+      devOverride = true
+      set({ alias }, { persist: !isInContainer })
       return
     }
-    const initial = (window as unknown as Record<string, unknown>).__PLAYER__
-    if (initial) {
-      set(initial, { persist: false })
+  } catch { /* ignore */ }
+  if (isInContainer) {
+    try {
+      const source = await withDeadline(hostPurseSource(), 10_000, 'host identity')
+      if (source) {
+        const address = await withDeadline(source.addressAt(0), 10_000, 'host identity')
+        set({ account: address }, { persist: false })
+        return
+      }
+      // No product-account capability in this host (today's hosts) — fall
+      // through to the dev resolution, the TEMPORARY stand-in.
+    } catch (err) {
+      console.warn('[chain] host identity resolution failed', err)
       return
     }
+  }
+  try {
     identity.set(loadPersisted())
   } catch { /* ignore */ }
-})()
+}
 
 /** The identity as of right now — for consumers that need a synchronous
  *  read (e.g. scoping the collection cache) rather than a subscription. */
