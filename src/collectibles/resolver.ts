@@ -19,9 +19,10 @@
 // only async work (loading the IPFS image) happens in the <img> tag.
 
 import cidMap from './cid_map.json'
+import { normalizeHash, shortCode } from '../lib/hash'
 
-+/** Paseo Bulletin Next IPFS gateway. Serves catalogue images at `/ipfs/<cid>`. */
-+const IPFS_GATEWAY = 'https://paseo-bulletin-next-ipfs.polkadot.io/ipfs'
+/** Paseo Bulletin Next IPFS gateway. Serves catalogue images at `/ipfs/<cid>`. */
+const IPFS_GATEWAY = 'https://paseo-bulletin-next-ipfs.polkadot.io/ipfs'
 
 // Rarity-roll bands over the uint16 space (0..65535), read from bytes 0-1:
 //   [0, RARE_THRESHOLD) → rare pool
@@ -271,6 +272,11 @@ export interface ResolvedCollectible {
    *  the swatch hex baked into the catalogue filename. Feeds the `--glow` CSS
    *  var so each collectible's halo matches its dominant colour. */
   glow: string
+  /** False when `url` is the shared "?" placeholder rather than the item's
+   *  own artwork (chain path only; catalogue entries always carry art).
+   *  Items without art are never visually identical — collapseDuplicates
+   *  keys them by hash instead of url. */
+  hasArt?: boolean
 }
 
 /** Parse a uint16 from two consecutive bytes at the given byte offset. */
@@ -280,6 +286,66 @@ function uint16At(hex: string, byteOffset: number): number {
   const lo = parseInt(hex.slice(start + 2, start + 4), 16)
   if (!Number.isFinite(hi) || !Number.isFinite(lo)) return 0
   return ((hi & 0xff) << 8) | (lo & 0xff)
+}
+
+/** Neutral placeholder shown when an item has no on-chain artwork yet:
+ *  a soft gradient tile with a question mark, as a data URI. */
+const PLACEHOLDER_ART =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+      '<rect width="512" height="512" rx="64" fill="#2e2b3d"/>' +
+      '<circle cx="256" cy="256" r="120" fill="#3d3952"/>' +
+      '<text x="256" y="300" font-size="140" text-anchor="middle" fill="#8a84a8" font-family="system-ui">?</text>' +
+      '</svg>'
+  )
+
+/** Light variant of the placeholder for unclaimed tiles, whose frame is
+ *  white — the same "?" motif drawn in soft greys so it reads on light. */
+const PLACEHOLDER_ART_LIGHT =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">' +
+      '<rect width="512" height="512" rx="64" fill="#f6f4fa"/>' +
+      '<circle cx="256" cy="256" r="120" fill="#e7e3f0"/>' +
+      '<text x="256" y="300" font-size="140" text-anchor="middle" fill="#8a84a8" font-family="system-ui">?</text>' +
+      '</svg>'
+  )
+
+/** Build a ResolvedCollectible from ON-CHAIN data only — no catalogue
+ *  lookup. Name and artwork come from chain metadata (fallbacks: a serial
+ *  code and a neutral placeholder); rarity and glow stay derived from the
+ *  hash bytes (byte math, not the catalogue). */
+export function chainCollectible(
+  hashHex: string,
+  name: string | undefined,
+  url: string | undefined,
+  placeholder: 'dark' | 'light' = 'dark'
+): ResolvedCollectible {
+  const hex = normalizeHash(hashHex || '')
+  const valid = /^[0-9a-f]{64}$/.test(hex)
+  const rarity: Rarity = valid && uint16At(hex, 0) < RARE_THRESHOLD ? 'rare' : 'common'
+  // Deterministic glow from hash bytes 4-6, lifted into a soft range so
+  // dark hashes still halo visibly.
+  const glow = valid
+    ? [4, 5, 6].map((i) => 90 + (parseInt(hex.slice(i * 2, i * 2 + 2), 16) % 128)).join(' ')
+    : '138 132 168'
+  // Same serial the tile badge shows (lib/hash shortCode) — including the
+  // non-hex passthrough for hashless items — so an item's fallback name
+  // always matches its own badge.
+  const code = hex ? shortCode(hex) : 'UNKNOWN'
+  return {
+    url: url ?? (placeholder === 'light' ? PLACEHOLDER_ART_LIGHT : PLACEHOLDER_ART),
+    filename: '',
+    name: name ?? `Collectible ${code}`,
+    collection: '',
+    collectionIndex: 0,
+    collectionSize: 0,
+    rarity,
+    isRare: rarity === 'rare',
+    glow,
+    hasArt: Boolean(url)
+  }
 }
 
 /** Resolve a 32-byte NFT hash to a catalogue image.

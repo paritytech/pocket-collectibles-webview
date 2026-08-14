@@ -5,6 +5,7 @@ import { formatMintDate } from '../collectibles/format'
 import { dropRateLabel } from '../collectibles/resolver'
 import { CONCEPTS } from '../collectibles/concepts'
 import InfoTip from '../components/InfoTip'
+import GiftBundle from '../components/GiftBundle'
 import { EASE, prefersReducedMotion } from '../anim/easings'
 import { haptic } from '../haptics/engine'
 
@@ -189,34 +190,43 @@ export default function DetailScreen({ list, index: initialIndex, originRect, on
               glow behind applies to every item (see styles.css). */}
           {isRare && <div className="detail-rays" aria-hidden="true" />}
           <div className="detail-hero-glow" aria-hidden="true" />
-          {/* Soft additive camera-flare behind the hero (heavily blurred copy,
-              z-index below the art) — strictly behind the opaque item. */}
-          <img
-            className="detail-bloom"
-            src={entry.resolved.url}
-            alt=""
-            aria-hidden="true"
-            draggable={false}
-          />
-          <img
-            className="detail-art"
-            ref={artRef}
-            src={entry.resolved.url}
-            alt={entry.resolved.name}
-            draggable={false}
-          />
-          {/* Surface shimmer — a diagonal highlight band swept across, masked
-              by the gem's own PNG alpha so the shine paints only on the gem
-              and never on the transparent surround. */}
-          {isRare && (
-            <div
-              className="detail-shimmer"
-              aria-hidden="true"
-              style={{
-                maskImage: `url(${entry.resolved.url})`,
-                WebkitMaskImage: `url(${entry.resolved.url})`
-              }}
-            />
+          {entry.pending ? (
+            /* Unclaimed: the hero stays wrapped — same gift bundle as the
+               tile, so the shared-element zoom lands on the identical parcel. */
+            <GiftBundle seed={entry.hash} className="detail-gift" />
+          ) : (
+            <>
+              {/* Soft additive camera-flare behind the hero (heavily blurred
+                  copy, z-index below the art) — strictly behind the opaque
+                  item. */}
+              <img
+                className="detail-bloom"
+                src={entry.resolved.url}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+              />
+              <img
+                className="detail-art"
+                ref={artRef}
+                src={entry.resolved.url}
+                alt={entry.resolved.name}
+                draggable={false}
+              />
+              {/* Surface shimmer — a diagonal highlight band swept across,
+                  masked by the gem's own PNG alpha so the shine paints only on
+                  the gem and never on the transparent surround. */}
+              {isRare && (
+                <div
+                  className="detail-shimmer"
+                  aria-hidden="true"
+                  style={{
+                    maskImage: `url(${entry.resolved.url})`,
+                    WebkitMaskImage: `url(${entry.resolved.url})`
+                  }}
+                />
+              )}
+            </>
           )}
         </div>
 

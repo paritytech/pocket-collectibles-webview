@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import type { CollectibleEntry } from '../collectibles/format'
 import { formatRelative } from '../collectibles/format'
+import GiftBundle from './GiftBundle'
 import { haptic } from '../haptics/engine'
 
 interface CollectibleTileProps {
@@ -27,7 +28,7 @@ export default function CollectibleTile({ entry, onOpen }: CollectibleTileProps)
     (e: React.MouseEvent<HTMLButtonElement>) => {
       haptic.initFromGesture()
       haptic.play('tap-view')
-      const art = e.currentTarget.querySelector('.tile-art') as HTMLElement | null
+      const art = e.currentTarget.querySelector('.tile-art, .tile-gift') as HTMLElement | null
       const rect = (art ?? e.currentTarget).getBoundingClientRect()
       onOpen(entry, rect)
     },
@@ -53,13 +54,19 @@ export default function CollectibleTile({ entry, onOpen }: CollectibleTileProps)
       ].filter(Boolean).join(' ')}
       style={glowStyle}
       onClick={handleClick}
-      aria-label={`${resolved.name}${resolved.isRare ? ', rare' : ''}${entry.count && entry.count > 1 ? `, ${entry.count} owned` : ''}`}
+      aria-label={`${resolved.name}${resolved.isRare ? ', rare' : ''}${pending ? ', unclaimed' : ''}${entry.count && entry.count > 1 ? `, ${entry.count} owned` : ''}`}
     >
       <div className="tile-frame">
-        {/* Colour-matched glow blob behind the item (brighter for rare). */}
-        <div className="tile-glow-blob" aria-hidden="true" />
+        {/* Colour-matched glow blob behind the item (brighter for rare).
+            Unclaimed tiles skip it — the glow is tuned for dark frames and
+            the wrapped parcel carries its own colour. */}
+        {!pending && <div className="tile-glow-blob" aria-hidden="true" />}
         <div className="tile-art-wrap">
-          {!failed ? (
+          {pending ? (
+            /* Unclaimed: the art stays wrapped — a gift bundle whose paper +
+               ribbon are picked from the credit's hash. */
+            <GiftBundle seed={entry.hash} className="tile-gift" />
+          ) : !failed ? (
             <>
               {/* Soft additive camera-flare BEHIND the item (heavily blurred
                   copy of the art). Strictly behind the opaque subject, so the
@@ -93,7 +100,7 @@ export default function CollectibleTile({ entry, onOpen }: CollectibleTileProps)
           )}
         </div>
         {resolved.isRare && <span className="tile-rare-badge" aria-hidden="true">✦ RARE</span>}
-        {pending && <span className="tile-pending-badge">PENDING</span>}
+        {pending && <span className="tile-pending-badge">UNCLAIMED</span>}
         {entry.count && entry.count > 1 && (
           <span className="tile-count-badge" aria-hidden="true">×{entry.count}</span>
         )}

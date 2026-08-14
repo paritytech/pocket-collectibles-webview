@@ -2,24 +2,41 @@
 
 A single-page web app (built to one self-contained `index.html`) that the
 native mobile app hosts in a WebView to show the user the collectibles
-(NFTs) they own. Native reads the user's owned NFTs from the chain and pushes
-them in; the webview resolves each to a catalogue image and presents an
-animated, swipeable gallery + detail view.
+(NFTs) they own. The webview reads the user's owned NFTs from Asset Hub
+itself (over a chain connection the host supplies — see §11), resolves each
+to a catalogue image, and presents an animated, swipeable gallery + detail
+view.
 
-> **The webview never touches the chain.** All chain reads are native's
-> responsibility. The webview is a pure renderer over the data you push.
+> **The webview opens no sockets of its own.** In production, chain bytes
+> flow through the host-supplied JSON-RPC bridge (§11). A host that does
+> not provide that bridge falls back to the legacy push model below: native
+> reads the chain and pushes the owned set in, and the webview is a pure
+> renderer over that data. Both paths feed the same store; last write wins.
 
 ---
 
 ## 0. TL;DR (Quick Reference)
 
-### What native reads from the chain (per current user)
+### What gets read from the chain (per current user)
+
+> Pallet reality check (verified against `pallet-scarcity` in polkadot-sdk
+> and the gamingnet testnet): `Scarcity.NftsByOwner: AccountId -> Nft` is a
+> **plain map** — every account holds at most ONE NFT (the "coinage"
+> model), so the user's collection is a **list of purse addresses**, one
+> item each. The earlier `Nfts(owner, *)` double-map description below the
+> line is stale. The 32-byte `hash` is not in the `Nft` value; it lives in
+> metadata under the key `"hash"`, resolved instance → item → collection.
 
 | Source | Yields |
 |---|---|
-| `Nfts(owner, *)` double-map | one `{ hash, mintedAt }` per owned NFT (`mintedAt` = the `u32` value) |
-| `NftCandidates(owner, *)` double-map *(optional)* | one `{ hash, pending: true }` per held candidate |
-| People Chain `Identity` username *(optional)* | `displayName` (e.g. `"byteboro.42"`) |
+| `Scarcity.NftsByOwner(purse)` per purse address | the `Nft` value; `mintedAt` = its `minted_at` (Unix **seconds**) |
+| `Scarcity.{Instance,Item,Collection}Metadata` key `"hash"` | the item's 32-byte identity `hash` (most specific level wins) |
+| People Chain `Identity` username *(optional, push path only)* | `displayName` (e.g. `"byteboro.42"`) |
+
+When the webview reads the chain itself (§11), native only supplies the
+purse address list (`window.setAccounts` / `__ACCOUNTS__`) and the JSON-RPC
+bridge. On the legacy push path, native performs the reads above and
+delivers the result via `setCollection` as before.
 
 ### What native installs / calls (web side)
 
@@ -329,14 +346,25 @@ header and scroll padding compute the insets correctly.
 
 ## 9. Implementation Checklist (Native)
 
-### Required (load-bearing)
+### Required (load-bearing) — chain-bridge path (§11)
 
-- [ ] Read `Nfts(currentUser, *)` → deliver `owned: [{ hash, mintedAt }]`
-      via `window.setCollection(...)` (or `__COLLECTION__`, or streamed
-      `pushNft`). `mintedAt` in **seconds**.
+- [ ] Provide the `collectiblesChain` JSON-RPC proxy (Asset Hub + People
+      Chain, multiplexed by the `chain` field) and call
+      `window.onChainRpcMessage(chain, ...)` with every response.
+- [ ] Supply the purse address list via `window.__ACCOUNTS__` /
+      `window.setAccounts([...])`.
+- [ ] Supply the player identity via `window.__PLAYER__` /
+      `window.setPlayerIdentity({...})` (credits leg; optional).
 - [ ] Register a `collectibles` message handler (iOS `messageHandlers` /
       Android `@JavascriptInterface`) to receive `flow.*` events.
 - [ ] Lay out the WebView full-bleed with safe-area insets respected.
+
+### Required — legacy push path (hosts without the chain bridge)
+
+- [ ] Read `Scarcity.NftsByOwner` per purse + the `"hash"` metadata →
+      deliver `owned: [{ hash, mintedAt }]` via `window.setCollection(...)`
+      (or `__COLLECTION__`, or streamed `pushNft`). `mintedAt` in
+      **seconds**.
 
 ### Recommended (graceful degradation)
 
@@ -365,14 +393,97 @@ header and scroll padding compute the insets correctly.
 
 ---
 
-## 11. Test Scenarios (no native required)
+## 11. Chain Provider Bridge (PROPOSED — needs native sign-off)
+
+The webview embeds `polkadot-api` and performs the chain reads itself,
+against **two chains**: Asset Hub (`Scarcity.NftsByOwner` + metadata →
+minted items) and the People Chain (the `Game` pallet's credit trees +
+`PalletGameApi` runtime APIs → earned credits, rendered as wrapped/pending
+items until minted). It never opens
+a socket inside a host; instead the host proxies raw JSON-RPC to its own
+chain connections. One bridge multiplexes both chains — every message
+names its chain:
+
+```js
+// web -> native: {"chain": "assetHub" | "people", "msg": <JSON-RPC obj>}
+// serialized as one JSON string per call.
+window.webkit.messageHandlers.collectiblesChain.postMessage(jsonString) // iOS
+window.collectiblesChain.postMessage(jsonString)                       // Android
+
+// native -> web: every JSON-RPC response/notification for that chain,
+// as a JSON string (the inner msg only, not the wrapper).
+window.onChainRpcMessage(chain, jsonString)
+```
+
+- The webview registers `onChainRpcMessage` at module load (buffer-or-
+  deliver per chain, bounded at 50 pre-connection messages) — safe to
+  call early.
+- The nodes behind the connections must support the `chainHead_v1_*` /
+  modern JSON-RPC spec (both gamingnet testnet chains do).
+- **Detection:** if neither `collectiblesChain` transport exists, the
+  chain layer stays completely inert inside a host — the legacy push path
+  (§0) is then the only data source. Outside a host (desktop dev), the
+  webview falls back to direct WebSockets to the gamingnet testnet.
+- The People Chain connection is optional: without it the shelf is
+  minted-items-only, never an error.
+
+**Which accounts to read** — the host supplies the purse address list:
+
+```js
+// Before the bundle's JS runs:
+window.__ACCOUNTS__ = ["5Dnw…", "5GNE…"]
+// Or at any later point (replaces the list; buffer-or-deliver):
+window.setAccounts(["5Dnw…", "5GNE…"])
+```
+
+Invalid SS58 entries are dropped with a console warning. An **empty list
+means "stay silent"** — the webview will not deliver an empty collection
+just because it wasn't told any addresses (that keeps the push path
+authoritative until accounts arrive).
+
+When NO explicit source speaks and the app is NOT embedded, the built-in
+**account deriver** supplies the list instead: purse `i` at derivation
+path `//product//scarcity//nft//<i>` (interim convention, not
+platform-ratified), walked over a 64-index window, dev keys derived
+in-page from the public Substrate dev mnemonic. Inside a host the deriver
+stays off until the host exposes a public-key-at-index capability —
+in-page derivation from a real user root is never acceptable. Errors during chain sync surface as
+`flow.error { phase: "chain", detail }` and retry with backoff (5 s → 60 s).
+
+**Who the player is** — the host supplies the credit-map identity
+(the pallet's `AccountOrPerson`):
+
+```js
+// Before the bundle's JS runs:
+window.__PLAYER__ = { account: "5Dnw…" }        // account-based player
+window.__PLAYER__ = { alias: "0x" + 64 hex }     // person/alias-based player
+// Or at any later point (buffer-or-deliver); pass null to clear:
+window.setPlayerIdentity({ account: "5Dnw…" })
+```
+
+Without an identity the credits leg is skipped (minted-items-only shelf).
+Earned credits are delivered to the gallery as `pending: true` items
+keyed by the credit hash; when `pallet-scarcity-claims` lands on Asset
+Hub, the webview will additionally split Earned/Claimable by checking
+roots (no host change needed).
+
+> The production rules for *which* purse addresses belong to the player
+> (derivation convention, cross-purse visibility) and *which identity*
+> queries the credit map (account vs alias, voucher keys) are open
+> platform questions; these seams are deliberately minimal.
+
+---
+
+## 12. Test Scenarios (no native required)
 
 Append query params in any browser:
 
 | Param | Effect |
 |---|---|
 | `?dev=1` | Dev panel: load mock collections, reload. |
-| `?mock=<name>` | Auto-load a scenario on boot: `small`, `typical`, `collector`, `rare`, `pending`, `empty`. |
+| `?mock=<name>` | Auto-load a scenario on boot: `small`, `typical`, `collector`, `rare`, `pending`, `empty`. Disables chain sync. |
+| `?address=<ss58>[,<ss58>…]` | Read these purse addresses from the gamingnet testnet (persisted for reloads). |
+| `?player=<ss58>` / `?alias=<0xhex32>` | Read this identity's credits from the People Chain (persisted for reloads). |
 | `?open=<n>` | Auto-open the nth tile's detail view. |
 | `?embed=1` | Force embedded full-screen layout. |
 
@@ -385,10 +496,11 @@ handles (`byteboro.42`), and timestamps clustered into "games".
 
 ---
 
-## 12. Versioning Note
+## 13. Versioning Note
 
-This contract is intentionally small: two storage maps + one optional
-identity query in, six event types out. If a future build needs more (e.g.
+This contract is intentionally small: a purse-address list + a JSON-RPC
+proxy in (or, on the push path, the pre-read owned set), six event types
+out. If a future build needs more (e.g.
 locked-slot mode), it will add **optional** fields to `CollectionInput` and
 new `flow.*` variants — never repurpose existing ones. Native can read the
 shipped TypeScript types as the source of truth: `src/bridge/types.ts`.
